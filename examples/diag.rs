@@ -26,11 +26,24 @@ fn main() {
     let mut min_pc = u32::MAX;
     let mut max_pc = 0u32;
     let mut unimpl: std::collections::BTreeMap<u32, (u32, u64)> = std::collections::BTreeMap::new();
+    // WATCH=addr1,addr2,... counts PC hits on each address (function entries).
+    let watch: Vec<u32> = std::env::var("WATCH")
+        .ok()
+        .map(|s| {
+            s.split(',')
+                .filter_map(|x| u32::from_str_radix(x.trim().trim_start_matches("0x"), 16).ok())
+                .collect()
+        })
+        .unwrap_or_default();
+    let mut watch_hits: std::collections::BTreeMap<u32, u64> = std::collections::BTreeMap::new();
     let chunk = 1_000_000u64;
     let mut done = 0u64;
     while done < max {
         for _ in 0..chunk {
             let pc = soc.core.regs[15];
+            if watch.contains(&pc) {
+                *watch_hits.entry(pc).or_insert(0) += 1;
+            }
             soc.step();
             if let Some(rt1060_rs::cortex_m::BreakCause::Unimplemented(hw)) = soc.core.break_cause {
                 let e = unimpl.entry(hw).or_insert((pc, 0));
@@ -46,6 +59,15 @@ fn main() {
             max_pc = max_pc.max(pc);
         }
         done += chunk;
+    }
+    if !watch.is_empty() {
+        println!("  WATCH hits:");
+        for &a in &watch {
+            println!(
+                "    {a:#010x}  ×{}",
+                watch_hits.get(&a).copied().unwrap_or(0)
+            );
+        }
     }
     if !unimpl.is_empty() {
         println!("  UNIMPLEMENTED instructions hit (encoding → first PC, count):");

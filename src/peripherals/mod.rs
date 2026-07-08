@@ -125,6 +125,8 @@ pub mod base {
     pub const TMR4: u32 = 0x401E_8000;
     pub const LPI2C1: u32 = 0x403F_0000;
     pub const LPI2C2: u32 = 0x403F_4000;
+    pub const LPI2C3: u32 = 0x403F_8000;
+    pub const LPI2C4: u32 = 0x403F_C000;
     pub const LPSPI1: u32 = 0x4039_4000;
     pub const LPSPI2: u32 = 0x4039_8000;
     pub const LPUART1: u32 = 0x4018_4000;
@@ -159,6 +161,8 @@ pub mod irq {
     pub const LPUART1: u32 = 20;
     pub const LPI2C1: u32 = 28;
     pub const LPI2C2: u32 = 29;
+    pub const LPI2C3: u32 = 30;
+    pub const LPI2C4: u32 = 31;
     pub const LPSPI1: u32 = 32;
     pub const LPSPI2: u32 = 33;
     pub const GPIO1_COMBINED_0_15: u32 = 80;
@@ -207,8 +211,8 @@ pub struct Peripherals {
     pub ocotp: RawRegs,
     pub pit: pit::Pit,
     pub semc: semc::Semc,
-    /// LPI2C1/2 (index 0 = LPI2C1).
-    pub lpi2c: [lpi2c::LpI2c; 2],
+    /// LPI2C1..4 (index 0 = LPI2C1). SwiftIO `Id.I2C0` is LPI2C3.
+    pub lpi2c: [lpi2c::LpI2c; 4],
     /// LPSPI1/2 (index 0 = LPSPI1).
     pub lpspi: [lpspi::LpSpi; 2],
     /// ADC1/2 (index 0 = ADC1).
@@ -277,7 +281,12 @@ impl Peripherals {
             ocotp: RawRegs::new("ocotp"),
             pit: pit::Pit::new(),
             semc: semc::Semc::new(),
-            lpi2c: [lpi2c::LpI2c::new(1), lpi2c::LpI2c::new(2)],
+            lpi2c: [
+                lpi2c::LpI2c::new(1),
+                lpi2c::LpI2c::new(2),
+                lpi2c::LpI2c::new(3),
+                lpi2c::LpI2c::new(4),
+            ],
             lpspi: [lpspi::LpSpi::new(1), lpspi::LpSpi::new(2)],
             adc: [adc::Adc::new(1), adc::Adc::new(2)],
             pwm: std::array::from_fn(|i| pwm::Pwm::new(i as u8 + 1)),
@@ -353,6 +362,8 @@ impl Peripherals {
             base::FLEXSPI2 => self.flexspi[1].read(off),
             base::LPI2C1 => self.lpi2c[0].read(off),
             base::LPI2C2 => self.lpi2c[1].read(off),
+            base::LPI2C3 => self.lpi2c[2].read(off),
+            base::LPI2C4 => self.lpi2c[3].read(off),
             base::LPSPI1 => self.lpspi[0].read(off),
             base::LPSPI2 => self.lpspi[1].read(off),
             base::ADC1 => self.adc[0].read(off),
@@ -410,6 +421,8 @@ impl Peripherals {
             base::FLEXSPI2 => self.flexspi[1].write(off, value),
             base::LPI2C1 => self.lpi2c[0].write(off, value),
             base::LPI2C2 => self.lpi2c[1].write(off, value),
+            base::LPI2C3 => self.lpi2c[2].write(off, value),
+            base::LPI2C4 => self.lpi2c[3].write(off, value),
             base::LPSPI1 => self.lpspi[0].write(off, value),
             base::LPSPI2 => self.lpspi[1].write(off, value),
             base::ADC1 => self.adc[0].write(off, value),
@@ -659,6 +672,12 @@ impl Peripherals {
         }
         if self.lpi2c[1].irq_pending() {
             m.set(irq::LPI2C2);
+        }
+        if self.lpi2c[2].irq_pending() {
+            m.set(irq::LPI2C3);
+        }
+        if self.lpi2c[3].irq_pending() {
+            m.set(irq::LPI2C4);
         }
         if self.lpspi[0].irq_pending() {
             m.set(irq::LPSPI1);

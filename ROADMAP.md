@@ -100,10 +100,10 @@ use). Frequency math and the full pin table remain.
 - [x] DMAMUX request routing + hardware-request triggering (source→channel)
 - [x] PWM: FlexPWM (duty observability) + **QTMR** (PERCLK counting, IRQ)
 - [ ] SAI/I²S, FlexCAN
-- [ ] **Interrupt-driven LPI2C completion** — the Zephyr `i2c_mcux_lpi2c`
-      driver is non-blocking (`k_sem_take` woken by the IRQ-28 state machine),
-      so the SwiftIO I2C examples (e.g. Humiture/SHT3x) block before a transfer;
-      the model completes transfers synchronously and drives no completion IRQ
+- [x] **LPI2C ×4 + interrupt-driven completion** — SwiftIO `Id.I2C0` is
+      **LPI2C3** (`0x403F_8000`, IRQ 30); adding LPI2C3/4 lets the Zephyr
+      `i2c_mcux_lpi2c` non-blocking driver's IRQ state machine complete, so the
+      real Humiture/SHT3x example reads the sensor over the interrupt path
 - [ ] eDMA scatter-gather (ESG), channel linking, error reporting
 
 ## M7 — Storage, USB, connectivity ⏳

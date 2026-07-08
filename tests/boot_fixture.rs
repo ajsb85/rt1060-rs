@@ -161,6 +161,87 @@ fn madmachine_swiftio_blink_toggles_the_led() {
     );
 }
 
+/// A minimal Sensirion **SHT3x** humidity/temperature sensor on I2C (address
+/// `0x44`). It answers any command by returning the fixed 6-byte measurement
+/// `[tempMSB, tempLSB, crc, humMSB, humLSB, crc]`; the MadDrivers `SHT3x` driver
+/// ignores the CRC bytes. `temp = 175*raw/65535 − 45`, `humidity = 100*raw/65535`.
+struct Sht3x {
+    data: [u8; 6],
+    idx: usize,
+}
+
+impl Sht3x {
+    fn new(temp_c: f32, humidity: f32) -> Self {
+        let raw_t = ((temp_c + 45.0) / 175.0 * 65535.0) as u16;
+        let raw_h = (humidity / 100.0 * 65535.0) as u16;
+        Self {
+            data: [
+                (raw_t >> 8) as u8,
+                raw_t as u8,
+                0,
+                (raw_h >> 8) as u8,
+                raw_h as u8,
+                0,
+            ],
+            idx: 0,
+        }
+    }
+}
+
+impl rt1060_rs::peripherals::lpi2c::I2cDevice for Sht3x {
+    fn address(&self) -> u8 {
+        0x44
+    }
+    fn start(&mut self, read: bool) -> bool {
+        if read {
+            self.idx = 0; // a read transaction restarts the response
+        }
+        true
+    }
+    fn write(&mut self, _byte: u8) -> bool {
+        true // accept every command byte (soft reset, measure, …)
+    }
+    fn read(&mut self) -> u8 {
+        let b = self.data.get(self.idx).copied().unwrap_or(0);
+        self.idx += 1;
+        b
+    }
+}
+
+/// The **real MadMachine Humiture example** (`05Humiture`): the MadDrivers
+/// `SHT3x` driver over `I2C(Id.I2C0)` reading temperature + humidity and
+/// printing them. SwiftIO `Id.I2C0` is LPI2C3; the driver is interrupt-driven
+/// (`LPI2C_MasterTransferNonBlocking` + `k_sem_take`, completed by the IRQ-30
+/// state-machine ISR), so this exercises the whole LPI2C interrupt path plus a
+/// real sensor driver. With an emulated SHT3x on the bus the firmware performs
+/// the real measure-then-read transaction and prints the decoded values.
+/// Ignored by default.
+#[test]
+#[ignore = "runs ~40M instructions through Zephyr; cargo test --release -- --ignored"]
+fn madmachine_humiture_reads_the_i2c_sensor() {
+    const I2C: &[u8] = include_bytes!("fixtures/madmachine_swiftio_i2c.elf");
+    let image = loader::load_elf(I2C).expect("parse ELF");
+    let mut soc = Rt1060::boot(&image);
+    soc.quiet();
+    // SwiftIO Id.I2C0 = LPI2C3 = index 2.
+    soc.bus.periph.lpi2c[2].attach(Box::new(Sht3x::new(25.0, 50.0)));
+    let mut console = String::new();
+    for _ in 0..60_000_000u64 {
+        soc.step();
+        if let Some(BreakCause::Unimplemented(hw)) = soc.core.break_cause {
+            panic!("unimplemented instruction {hw:#06x} in Humiture boot");
+        }
+        console.push_str(&soc.console_string());
+        if console.contains("Temperature: 25.0") {
+            break;
+        }
+    }
+    assert!(
+        console.contains("Temperature: 25.0"),
+        "the firmware should read and print the sensor temperature: {console:?}"
+    );
+}
+
 /// The **real MadMachine BreathingLED example** (`03Buzzer/BreathingLED`):
 /// `PWMOut(Id.PWM4A).setDutycycle(d)` with `d` ramping 0→1→0. It drives the
 /// FlexPWM peripheral, and the emulator observes the duty via `pwm_duty` —

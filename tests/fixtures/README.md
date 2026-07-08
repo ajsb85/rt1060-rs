@@ -106,3 +106,14 @@ The **real MadMachine BreathingLED example** (SwiftIO Playground
 whose duty cycle ramps 0→1→0 to "breathe" an LED. It drives the FlexPWM
 peripheral; the emulator observes the changing duty via `Rt1060::pwm_duty(4, 3,
 Chan::A)`. See `tests/boot_fixture.rs`.
+
+### `madmachine_swiftio_i2c.elf`
+
+The **real MadMachine Humiture example** (SwiftIO Playground `05Humiture`) built
+with the MadMachine SDK: the MadDrivers `SHT3x` driver over `I2C(Id.I2C0)`
+reading temperature + humidity. SwiftIO `Id.I2C0` is **LPI2C3** (`0x403F_8000`).
+The Zephyr `i2c_mcux_lpi2c` driver is interrupt-driven
+(`LPI2C_MasterTransferNonBlocking` + `k_sem_take`, completed by the IRQ-30 ISR
+state machine), so this fixture exercises the whole LPI2C interrupt path plus a
+real sensor driver. `tests/boot_fixture.rs` attaches an emulated SHT3x and
+asserts the decoded temperature is printed.
