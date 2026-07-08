@@ -121,6 +121,13 @@ fn madmachine_swiftio_blink_boots_zephyr() {
         console.contains("LittleFS"),
         "expected Zephyr console output, got: {console:?}"
     );
+    // The FlexSPI IP flash engine is correct end-to-end: littlefs formats and
+    // mounts on the emulated NOR (an earlier bug wrote the superblock to the
+    // wrong address, so the mount failed "Superblock unwritable").
+    assert!(
+        console.contains("/lfs mounted"),
+        "littlefs should format and mount on the emulated FlexSPI NOR"
+    );
 }
 
 /// Deep check: run the real MadMachine Blink long enough for the `sleep(ms:500)`
