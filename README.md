@@ -31,14 +31,16 @@ Milestone tracking lives in [`ROADMAP.md`](ROADMAP.md). Snapshot:
 | Cortex-M7 core (Thumb-2 + DSP, exceptions, NVIC 158 IRQs, SysTick, MPU) | ✅ ported, 98 tests |
 | Memory map + AIPS bus (ITCM/DTCM/OCRAM/FlexSPI/SDRAM) | ✅ |
 | Loader (ELF32, raw bin, MadMachine `micro.img`) | ✅ |
-| LPUART (console), GPIO, CCM, GPT, SRC, WDOG | ✅ starter models |
+| LPUART (console), GPIO, CCM, GPT, SRC, WDOG | ✅ |
 | CCM_ANALOG PLLs (LOCK/OSC/DCDC), SEMC status, boot spin-loops | ✅ terminate |
 | RGB LED observable (GPIO1 9/10/11, active-low) via `led_rgb()` | ✅ |
-| Clock-tree frequency math, IOMUXC full pin table | ⏳ |
-| DMA (eDMA), LPSPI/LPI2C, USDHC (SD), USB, SEMC command decode | ⬜ ROADMAP |
+| Clock-tree frequency model (core/IPG/PERCLK/UART) → `core_hz()` | ✅ |
+| PIT, GPT (clock-domain accurate) | ✅ |
+| eDMA (32-ch TCD engine through the bus), LPI2C, LPSPI, ADC | ✅ + device hooks |
+| DMAMUX hw-request routing, PWM/QTMR, USDHC (SD), USB, SEMC decode | ⬜ ROADMAP |
+| IOMUXC full 44-pin table, PLL PFD fractional math | ⏳ |
 | Double-precision FPU (FPv5-D16) | ⬜ ROADMAP (SwiftIO builds soft-float) |
-| GDB stub, WASM front-end | ⬜ ROADMAP |
-| Boot a real SwiftIO Micro image | ⬜ ROADMAP |
+| GDB stub, WASM front-end, boot a real SwiftIO Micro image | ⬜ ROADMAP |
 
 ## Quick start
 

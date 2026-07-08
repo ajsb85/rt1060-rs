@@ -71,18 +71,27 @@ use). Frequency math and the full pin table remain.
       `STS0.IDLE`; SDRAM stays pre-mapped RAM
 - [x] IOMUXC pad mux (stored-readback) + observable **RGB LED** = GPIO1
       pins 9/10/11 (pads `GPIO_AD_B0_09/10/11`, active-low) via `led_rgb()`
-- [ ] CCM_ANALOG PLL/PFD **frequency** math (ARM PLL 600 MHz, SYS/USB/ENET)
-- [ ] CCM clock-root dividers feeding GPT/PIT/LPUART baud (real time base)
+- [x] CCM_ANALOG PLL **frequency** math (ARM PLL 600 MHz path exact; SYS/USB/
+      PFD nominal) → `clocks.rs`; `Rt1060::core_hz()`/`perclk_hz()`
+- [x] CCM clock roots (core/AHB/IPG/PERCLK/UART) feeding GPT/PIT time base
+      via a per-domain fractional cycle converter in `Peripherals::tick`
+- [ ] PLL2/PLL3 PFD fractional-divider math (currently nominal frequencies)
 - [ ] Full SwiftIO id 0..43 → (GPIO, pin) table (needs HAL archive extract:
       `../mm-sdk/boards/SwiftIOMicro/lib/.../lib..__HalSwiftIO__driver__zephyr.a`)
 - [ ] SEMC real command decode / SDRAM refresh timing (beyond status)
 
-## M6 — DMA & serial/analog peripherals ⬜
+## M6 — DMA & serial/analog peripherals ⏳
 
-- [ ] eDMA + DMAMUX (Zephyr routes LPUART/LPSPI/ADC through it)
-- [ ] LPSPI ×2, LPI2C ×2 (SwiftIO SPI/I²C buses + MadDrivers)
-- [ ] ADC (14 channels), PWM (14), FlexPWM, QTMR
-- [ ] PIT (periodic interrupt timer) full model
+- [x] **eDMA** transfer engine (32-ch TCD, minor/major loop, INT/DONE, IRQ)
+      driven through the system bus; software START + action registers
+- [x] **PIT** full 4-channel model (cascade, PERCLK, IRQ 122)
+- [x] **LPI2C** ×2 master with a pluggable `I2cDevice` hook (+ `MemI2cDevice`)
+- [x] **LPSPI** ×2 full-duplex master with an `SpiDevice` hook (+ `SeqSpiDevice`)
+- [x] **ADC** ×2 (12-bit, programmable channel inputs, COCO/AIEN IRQ 67/68)
+- [ ] DMAMUX request routing + hardware-request triggering (source→channel;
+      `edma::service` already takes the per-channel request slice)
+- [ ] PWM (14: FlexPWM + QTMR), SAI/I²S, FlexCAN
+- [ ] eDMA scatter-gather (ESG), channel linking, error reporting
 
 ## M7 — Storage, USB, connectivity ⬜
 

@@ -69,8 +69,10 @@ following the rp2040js / rp2350-rs / mg24-rs paradigm.
   (`--no-verify` skips the interactive DoD checklist, required non-tty;
   subject: lowercase, ≤72 chars, no period; body lines ≤80 chars).
   Commits are SSH-signed automatically (global `commit.gpgsign`).
-- Types: feat fix perf refactor test docs chore ci. Scopes: cpu memory bus
-  gpio ccm lpuart gpt src wdog iomuxc loader board repo design docs fixtures.
+- Types: feat fix perf refactor test docs chore ci. Scopes are **letters
+  only** (the tbdflow lint rejects digits — use `spi`/`dma`/`adc`/`periph`,
+  not `lpspi`/`lpi2c`): cpu memory bus gpio ccm clocks pit gpt dma spi adc
+  periph src wdog iomuxc semc loader board repo design docs fixtures.
 - **tbdflow stages EVERYTHING (`git add -A`)** — keep the working tree free
   of unrelated changes before committing; it also cannot create the root
   commit on an unborn branch (use plain git once, then tbdflow).
