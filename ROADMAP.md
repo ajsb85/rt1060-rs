@@ -122,8 +122,10 @@ use). Frequency math and the full pin table remain.
 - [x] GDB remote-serial stub: breakpoints, mem, regs, step/continue,
       Ctrl-C; `examples/gdbserver.rs` + `gdb-multiarch`
 - [x] Trace/log gating by env var (`RT1060_TRACE` = writes, `=all` = reads)
+- [x] `criterion` benchmarks (`benches/step.rs`): ALU-loop + real-firmware
+      instruction throughput; sustained ~13M inst/s confirms the hot loop
+      allocates nothing per step
 - [ ] WASM front-end (`wasm-bindgen`) for an in-browser SwiftIO playground
-- [ ] `criterion` benchmarks; keep the hot loop allocation-free
 - [ ] Hardware breakpoints (FPB) + watchpoints in the GDB stub
 
 ## Known simplifications (revisit as firmware demands)
