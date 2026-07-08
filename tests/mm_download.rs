@@ -23,6 +23,9 @@ const PART_BEGIN_TAG: u32 = 0x38;
 const PART_DATA_TAG: u32 = 0x39;
 const PART_END_TAG: u32 = 0x3A;
 const PART_SETBOOT_TAG: u32 = 0x3B;
+const FS_FILE_BEGIN_TAG: u32 = 0x52;
+const FS_FILE_DATA_TAG: u32 = 0x53;
+const FS_FILE_END_TAG: u32 = 0x54;
 
 /// CRC-32/ISO-HDLC (zlib `crc32`) over `tag | length | payload`.
 fn crc32(data: &[u8]) -> u32 {
@@ -113,6 +116,48 @@ fn mm_download_ram_lands_in_sdram() {
     assert_eq!(
         landed, data,
         "the RAM download should place its bytes verbatim in SDRAM"
+    );
+}
+
+/// `mm copy` a file to the on-board **littlefs** filesystem over the FS_FILE
+/// tags (`fs_file_begin(path)` / `fs_file_data` / `fs_file_end`). The bootloader
+/// mounts littlefs on the NOR (`/lfs`) and writes the file into it; the content
+/// must then be present in the NOR littlefs region. The emulated equivalent of
+/// `mm copy <file> /lfs/...`.
+#[test]
+#[ignore = "boots the bootloader + writes a littlefs file (~60M steps); cargo test --release -- --ignored"]
+fn mm_download_writes_a_file_to_littlefs() {
+    let mut soc = Rt1060::boot(&loader::load_bin(0x0, BOOTLOADER));
+    soc.quiet();
+    for _ in 0..40_000_000u64 {
+        soc.step();
+    }
+    for i in 0..2 {
+        soc.bus.periph.lpuart[i].take_output();
+    }
+
+    let content = b"HELLO_FROM_MM_FS_DOWNLOAD_0123456789_ABCDEF".to_vec();
+    transact(&mut soc, SYNC_TAG, &[]);
+    let mut begin = (content.len() as u32).to_be_bytes().to_vec();
+    begin.extend_from_slice(b"/lfs/test.txt\0");
+    transact(&mut soc, FS_FILE_BEGIN_TAG, &begin);
+    transact(&mut soc, FS_FILE_DATA_TAG, &content);
+    transact(&mut soc, FS_FILE_END_TAG, &crc32(&content).to_be_bytes());
+
+    // The file's bytes must now be stored in the NOR littlefs partition (0x80_0000).
+    let mut found = None;
+    'scan: for off in 0x80_0000u32..0x81_0000 {
+        for (i, &c) in content.iter().enumerate() {
+            if soc.bus.read8(0x6000_0000 + off + i as u32) != c {
+                continue 'scan;
+            }
+        }
+        found = Some(off);
+        break;
+    }
+    assert!(
+        found.is_some(),
+        "the file written over FS_FILE should land in the NOR littlefs"
     );
 }
 
