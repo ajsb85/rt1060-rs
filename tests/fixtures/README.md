@@ -35,6 +35,12 @@ blocks this image touches (CCM clocks, IOMUXC, GPIO). Exercised by
 - run long enough, `GPIO1_IO09` **toggles** — the LED blinks (the `--ignored`
   deep test, ~250M instructions).
 
-Other bring-up candidates still available (not yet committed): the FlexSPI
-(`0x6000_2000`) and SDRAM (`0x8000_2000`) variants in the same SDK app dir, and
-`../mm-sdk/boards/SerialLoader.bin` (the MadMachine second-stage RAM loader).
+### `rt1050_led_blinky_flexspi.elf` / `rt1050_led_blinky_sdram.elf`
+
+The same SDK blinky linked to run **XIP from FlexSPI NOR** (`0x6000_2000`) and
+**from SDRAM** (`0x8000_2000`, the MadMachine run location). Both boot, run
+init cleanly, and blink `GPIO1_IO09` — proving the flash-XIP and SDRAM code
+paths. From the same SDK app dir as the ITCM variant.
+
+Still available (not committed): `../mm-sdk/boards/SerialLoader.bin` (the
+MadMachine second-stage RAM loader).

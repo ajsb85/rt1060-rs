@@ -1,53 +1,63 @@
 // SPDX-License-Identifier: MIT
 // Copyright (c) 2026 Alexander Salas Bastidas <ajsb85@firechip.dev>
 
-//! Boot a **real, unmodified** NXP SDK Cortex-M7 firmware image and confirm
-//! the emulator runs it — the M8 milestone. The fixture is an IAR-built LED
-//! blinky for the i.MX RT1050 EVK (RT1050 ≈ RT1062: same core, register-
-//! compatible peripherals), running from ITCM at 0x2000. Provenance:
-//! `tests/fixtures/README.md`.
+//! Boot **real, unmodified** NXP SDK Cortex-M7 firmware and confirm the
+//! emulator runs it from every code region — the M8 milestone. The fixtures
+//! are IAR-built LED blinkies for the i.MX RT1050 EVK (RT1050 ≈ RT1062: same
+//! core, register-compatible peripherals) linked for three different memories:
+//! ITCM (`0x2000`), FlexSPI NOR XIP (`0x6000_2000`), and SDRAM (`0x8000_2000`,
+//! the MadMachine run location). Provenance: `tests/fixtures/README.md`.
 
 use rt1060_rs::cortex_m::BreakCause;
 use rt1060_rs::{Rt1060, loader};
 
-const BLINKY: &[u8] = include_bytes!("fixtures/rt1050_led_blinky_itcm.elf");
+const ITCM: &[u8] = include_bytes!("fixtures/rt1050_led_blinky_itcm.elf");
+const FLEXSPI: &[u8] = include_bytes!("fixtures/rt1050_led_blinky_flexspi.elf");
+const SDRAM: &[u8] = include_bytes!("fixtures/rt1050_led_blinky_sdram.elf");
 
-/// Fast check: the image boots, its reset/init runs, and the SDK configures
-/// the EVK user LED (GPIO1_IO09) as an output — all without hitting an
-/// unimplemented instruction or (verified separately) an unmapped register.
-#[test]
-fn rt1050_blinky_boots_and_configures_the_led_gpio() {
-    let image = loader::load_elf(BLINKY).expect("parse ELF");
+/// Boot `elf`, run its init, and assert it reached GPIO setup without hitting
+/// an unimplemented instruction — from whichever memory it is linked for.
+fn boots_and_configures_led(elf: &[u8], expected_base: u32) {
+    let image = loader::load_elf(elf).expect("parse ELF");
     let mut soc = Rt1060::boot(&image);
     soc.quiet();
-
-    // Reset vector came from the image's table at ITCM 0x2000.
-    assert_eq!(image.base, 0x0000_2000);
+    assert_eq!(image.base, expected_base, "linked load base");
     assert_eq!(soc.core.regs[13], 0x2002_0000, "initial SP");
-    assert_eq!(soc.core.regs[15] & !1, 0x0000_4fc0, "reset handler");
 
-    // Run through clock init, pin-mux, and GPIO setup.
     for _ in 0..2_000_000 {
         soc.step();
         if let Some(BreakCause::Unimplemented(hw)) = soc.core.break_cause {
-            panic!("hit an unimplemented instruction {hw:#06x} at boot");
+            panic!("unimplemented instruction {hw:#06x} booting from {expected_base:#010x}");
         }
     }
-
-    // The SDK's GPIO init drove GPIO1_IO09's direction to output.
     assert!(
         soc.bus.periph.gpio[0].is_output(9),
-        "EVK user LED (GPIO1_IO09) configured as output during boot"
+        "EVK user LED (GPIO1_IO09) configured as output from base {expected_base:#010x}"
     );
 }
 
-/// Deep check: run long enough for the ~1 s delay loop to elapse and observe
-/// the LED actually toggle. Ignored by default (hundreds of millions of
+#[test]
+fn boots_from_itcm() {
+    boots_and_configures_led(ITCM, 0x0000_2000);
+}
+
+#[test]
+fn boots_from_flexspi_nor_xip() {
+    boots_and_configures_led(FLEXSPI, 0x6000_2000);
+}
+
+#[test]
+fn boots_from_sdram() {
+    boots_and_configures_led(SDRAM, 0x8000_2000);
+}
+
+/// Deep check: run long enough for the delay loop to elapse and observe the
+/// LED actually toggle. Ignored by default (hundreds of millions of
 /// instructions); run with `cargo test --release -- --ignored`.
 #[test]
 #[ignore = "runs ~250M instructions; cargo test --release -- --ignored"]
-fn rt1050_blinky_toggles_the_led() {
-    let image = loader::load_elf(BLINKY).expect("parse ELF");
+fn sdram_blinky_toggles_the_led() {
+    let image = loader::load_elf(SDRAM).expect("parse ELF");
     let mut soc = Rt1060::boot(&image);
     soc.quiet();
 
