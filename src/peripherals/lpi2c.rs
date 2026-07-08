@@ -65,7 +65,7 @@ pub struct LpI2c {
     /// Sticky status bits the driver clears via W1C (SDF/NDF/EPF/…).
     msr_sticky: u32,
     rx: VecDeque<u8>,
-    devices: Vec<Box<dyn I2cDevice>>,
+    devices: Vec<Box<dyn I2cDevice + Send>>,
     /// Index into `devices` of the currently addressed target.
     active: Option<usize>,
 }
@@ -85,7 +85,7 @@ impl LpI2c {
     }
 
     /// Attach a device to this bus (builder-style for tests / board setup).
-    pub fn attach(&mut self, dev: Box<dyn I2cDevice>) {
+    pub fn attach(&mut self, dev: Box<dyn I2cDevice + Send>) {
         self.devices.push(dev);
     }
 

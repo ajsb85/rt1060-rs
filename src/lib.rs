@@ -15,6 +15,7 @@
 //! (see CLAUDE.md hard rules).
 
 pub mod cortex_m;
+pub mod gdb;
 pub mod loader;
 pub mod memory;
 pub mod peripherals;

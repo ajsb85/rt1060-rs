@@ -45,7 +45,7 @@ pub struct LpSpi {
     /// Sticky status the driver clears via W1C (WCF/FCF/TCF).
     sr_sticky: u32,
     rx: VecDeque<u32>,
-    device: Option<Box<dyn SpiDevice>>,
+    device: Option<Box<dyn SpiDevice + Send>>,
 }
 
 impl LpSpi {
@@ -63,7 +63,7 @@ impl LpSpi {
     }
 
     /// Attach the device selected on this bus (single-target for now).
-    pub fn attach(&mut self, dev: Box<dyn SpiDevice>) {
+    pub fn attach(&mut self, dev: Box<dyn SpiDevice + Send>) {
         self.device = Some(dev);
     }
 
