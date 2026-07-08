@@ -152,3 +152,13 @@ Two more real SwiftIO Playground examples over I2C (`Id.I2C0` = LPI2C3):
 auto-increment bit) and `06RTC/ReadingTime` (MadDrivers `PCF8563`, a time
 write→read round-trip). `tests/boot_fixture.rs` models each with a seeded
 `MemI2cDevice` and asserts the decoded reading (Z = +1 g; `2023/04/09 … 10:26`).
+
+### `mm_serial_loader.bin`
+
+The **real MadMachine `SerialLoader` recovery bootloader** (`mm-sdk 2.2.0`,
+`boards/SerialLoader.bin`) — a Zephyr-based loader that runs from ITCM and
+handles `mm download`. Loaded at `0x0`, it boots cleanly (full Zephyr + littlefs,
+logs "Recovery base Zephyr! mm_feather" on LPUART2) and accepts the framed
+serial download protocol on LPUART1. `tests/mm_download.rs` and
+`examples/mm_download.rs` drive that protocol (SYNC + RAM download) and verify
+the bytes land in SDRAM — the emulated equivalent of `mm download <image>`.
