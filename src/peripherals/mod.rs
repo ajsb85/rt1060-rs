@@ -36,6 +36,7 @@ pub mod pwm;
 pub mod qtmr;
 pub mod semc;
 pub mod src;
+pub mod usb;
 pub mod usdhc;
 pub mod wdog;
 
@@ -100,6 +101,7 @@ pub mod base {
     pub const SRC: u32 = 0x400F_8000;
     pub const CCM: u32 = 0x400F_C000;
     pub const SEMC: u32 = 0x402F_0000;
+    pub const USB: u32 = 0x402E_0000; // USB1 (off 0) + USB2 (off 0x200)
     pub const USDHC1: u32 = 0x402C_0000;
     pub const USDHC2: u32 = 0x402C_4000;
     pub const PWM1: u32 = 0x403D_C000;
@@ -163,6 +165,8 @@ pub mod irq {
     pub const TMR4: u32 = 136;
     pub const USDHC1: u32 = 110;
     pub const USDHC2: u32 = 111;
+    pub const USB_OTG1: u32 = 113;
+    pub const USB_OTG2: u32 = 112;
 }
 
 // ---------------------------------------------------------------------------
@@ -196,6 +200,8 @@ pub struct Peripherals {
     pub qtmr: [qtmr::Qtmr; 4],
     /// USDHC1/2 (index 0 = USDHC1).
     pub usdhc: [usdhc::Usdhc; 2],
+    /// USB1/USB2 OTG controllers (one shared window).
+    pub usb: usb::Usb,
     pub gpt: [gpt::Gpt; 2],
     pub wdog1: wdog::Wdog,
     pub wdog2: wdog::Wdog,
@@ -252,6 +258,7 @@ impl Peripherals {
             pwm: std::array::from_fn(|i| pwm::Pwm::new(i as u8 + 1)),
             qtmr: std::array::from_fn(|i| qtmr::Qtmr::new(i as u8 + 1)),
             usdhc: [usdhc::Usdhc::new(1), usdhc::Usdhc::new(2)],
+            usb: usb::Usb::new(),
             gpt: [gpt::Gpt::new(), gpt::Gpt::new()],
             wdog1: wdog::Wdog::new(wdog::Kind::Wdog),
             wdog2: wdog::Wdog::new(wdog::Kind::Wdog),
@@ -307,6 +314,7 @@ impl Peripherals {
             base::SEMC => self.semc.read(off),
             base::USDHC1 => self.usdhc[0].read(off),
             base::USDHC2 => self.usdhc[1].read(off),
+            base::USB => self.usb.read(off),
             base::LPI2C1 => self.lpi2c[0].read(off),
             base::LPI2C2 => self.lpi2c[1].read(off),
             base::LPSPI1 => self.lpspi[0].read(off),
@@ -355,6 +363,7 @@ impl Peripherals {
             base::SEMC => self.semc.write(off, value),
             base::USDHC1 => self.usdhc[0].write(off, value),
             base::USDHC2 => self.usdhc[1].write(off, value),
+            base::USB => self.usb.write(off, value),
             base::LPI2C1 => self.lpi2c[0].write(off, value),
             base::LPI2C2 => self.lpi2c[1].write(off, value),
             base::LPSPI1 => self.lpspi[0].write(off, value),
@@ -578,6 +587,12 @@ impl Peripherals {
         }
         if self.usdhc[1].irq_pending() {
             m.set(irq::USDHC2);
+        }
+        if self.usb.irq_pending(0) {
+            m.set(irq::USB_OTG1);
+        }
+        if self.usb.irq_pending(1) {
+            m.set(irq::USB_OTG2);
         }
         if self.lpi2c[0].irq_pending() {
             m.set(irq::LPI2C1);

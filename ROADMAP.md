@@ -88,15 +88,20 @@ use). Frequency math and the full pin table remain.
 - [x] **LPI2C** ×2 master with a pluggable `I2cDevice` hook (+ `MemI2cDevice`)
 - [x] **LPSPI** ×2 full-duplex master with an `SpiDevice` hook (+ `SeqSpiDevice`)
 - [x] **ADC** ×2 (12-bit, programmable channel inputs, COCO/AIEN IRQ 67/68)
-- [ ] DMAMUX request routing + hardware-request triggering (source→channel;
-      `edma::service` already takes the per-channel request slice)
-- [ ] PWM (14: FlexPWM + QTMR), SAI/I²S, FlexCAN
+- [x] DMAMUX request routing + hardware-request triggering (source→channel)
+- [x] PWM: FlexPWM (duty observability) + **QTMR** (PERCLK counting, IRQ)
+- [ ] SAI/I²S, FlexCAN
 - [ ] eDMA scatter-gather (ESG), channel linking, error reporting
 
-## M7 — Storage, USB, connectivity ⬜
+## M7 — Storage, USB, connectivity ⏳
 
-- [ ] USDHC + SD card image (SwiftIO loads user apps / assets from SD)
-- [ ] USB OTG1 device (CDC-ACM: the `mm download` / console bridge)
+- [x] **USDHC + SD card image** (attach a card; SD init + block read/write
+      through the PIO data port; SwiftIO loads apps/assets from SD)
+- [x] **USB OTG** controller register block (USB1/USB2; reset self-clear,
+      PORTSC connected, USBSTS W1C) — init runs without hanging
+- [ ] USB device transfer engine (queue heads / dTDs) + CDC-ACM enumeration
+      (the `mm download` / console bridge)
+- [ ] USDHC ADMA/DMA data path (currently PIO)
 - [ ] FlexSPI controller register model + XIP program/erase
 - [ ] ENET, CAN (FlexCAN), I²S (SAI)
 

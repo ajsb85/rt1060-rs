@@ -37,9 +37,12 @@ Milestone tracking lives in [`ROADMAP.md`](ROADMAP.md). Snapshot:
 | Clock-tree frequency model (core/IPG/PERCLK/UART) → `core_hz()` | ✅ |
 | PIT, GPT (clock-domain accurate) | ✅ |
 | eDMA (32-ch TCD through the bus) + DMAMUX hw requests, LPI2C, LPSPI, ADC | ✅ + device hooks |
-| FlexPWM (observable duty via `pwm_duty()`) | ✅ |
+| FlexPWM (`pwm_duty()`) + QTMR (PERCLK counting) | ✅ |
+| USDHC + attachable **SD card** (init + block read/write) | ✅ |
+| USB OTG register block (init runs; full CDC enumeration ⬜) | ✅ |
+| **Boots a real NXP SDK Cortex-M7 blinky — LED toggles** | ✅ |
 | **GDB remote stub** (`gdb-multiarch`) + `RT1060_TRACE` logging | ✅ |
-| QTMR, USDHC (SD), USB CDC, SEMC command decode | ⬜ ROADMAP |
+| USB CDC enumeration, SEMC command decode, ENET/CAN/SAI | ⬜ ROADMAP |
 | IOMUXC full 44-pin table, PLL PFD fractional math | ⏳ |
 | Double-precision FPU (FPv5-D16) | ⬜ ROADMAP (SwiftIO builds soft-float) |
 | WASM front-end, boot a real SwiftIO Micro image | ⬜ ROADMAP |
