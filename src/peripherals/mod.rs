@@ -24,6 +24,7 @@
 pub mod analog;
 pub mod ccm;
 pub mod clocks;
+pub mod edma;
 pub mod gpio;
 pub mod gpt;
 pub mod lpi2c;
@@ -78,6 +79,8 @@ impl RawRegs {
 pub mod base {
     // AIPS-1 .. AIPS-4 modeled blocks (subset; extend per ROADMAP).
     pub const DCDC: u32 = 0x4008_0000;
+    pub const DMA0: u32 = 0x400E_8000;
+    pub const DMAMUX: u32 = 0x400E_C000;
     pub const PIT: u32 = 0x4008_4000;
     pub const IOMUXC_GPR: u32 = 0x400A_C000;
     pub const WDOG1: u32 = 0x400B_8000;
@@ -146,6 +149,8 @@ pub mod irq {
 pub struct Peripherals {
     pub ccm: ccm::Ccm,
     pub ccm_analog: analog::CcmAnalog,
+    pub edma: edma::Edma,
+    pub dmamux: RawRegs,
     pub iomuxc: RawRegs,
     pub iomuxc_gpr: RawRegs,
     pub src: src::Src,
@@ -194,6 +199,8 @@ impl Peripherals {
         let mut p = Self {
             ccm: ccm::Ccm::new(),
             ccm_analog: analog::CcmAnalog::new(),
+            edma: edma::Edma::new(),
+            dmamux: RawRegs::new("dmamux"),
             iomuxc: RawRegs::new("iomuxc"),
             iomuxc_gpr: RawRegs::new("iomuxc_gpr"),
             src: src::Src::new(),
@@ -248,6 +255,8 @@ impl Peripherals {
         match b {
             base::CCM => self.ccm.read(off),
             base::CCM_ANALOG => self.ccm_analog.read(off),
+            base::DMA0 => self.edma.read32(off),
+            base::DMAMUX => self.dmamux.read(off),
             base::IOMUXC => self.iomuxc.read(off),
             base::IOMUXC_GPR => self.iomuxc_gpr.read(off),
             base::SRC => self.src.read(off),
@@ -285,6 +294,8 @@ impl Peripherals {
         match b {
             base::CCM => self.ccm.write(off, value),
             base::CCM_ANALOG => self.ccm_analog.write(off, value),
+            base::DMA0 => self.edma.write32(off, value),
+            base::DMAMUX => self.dmamux.write(off, value),
             base::IOMUXC => self.iomuxc.write(off, value),
             base::IOMUXC_GPR => self.iomuxc_gpr.write(off, value),
             base::SRC => self.src.write(off, value),
@@ -313,6 +324,47 @@ impl Peripherals {
         // A CCM / CCM_ANALOG write may have retuned the clock tree.
         if b == base::CCM || b == base::CCM_ANALOG {
             self.refresh_clocks();
+        }
+    }
+
+    // --- width-accurate narrow access ---------------------------------------
+    //
+    // The eDMA TCD packs two 16-bit fields per word, so byte/halfword accesses
+    // to its window (`DMA0`) must land on the exact addressed bytes rather than
+    // the replicate-to-word path ordinary word registers use. The bus routes
+    // 8/16-bit peripheral access through these methods.
+
+    pub fn read8(&mut self, addr: u32) -> u8 {
+        if addr & !0x3FFF == base::DMA0 {
+            self.edma.read8(addr & 0x3FFF)
+        } else {
+            (self.read(addr & !0x3) >> ((addr & 0x3) * 8)) as u8
+        }
+    }
+
+    pub fn read16(&mut self, addr: u32) -> u16 {
+        if addr & !0x3FFF == base::DMA0 {
+            self.edma.read16(addr & 0x3FFF)
+        } else {
+            (self.read(addr & !0x3) >> ((addr & 0x2) * 8)) as u16
+        }
+    }
+
+    pub fn write8(&mut self, addr: u32, value: u8) {
+        if addr & !0x3FFF == base::DMA0 {
+            self.edma.write8(addr & 0x3FFF, value);
+        } else {
+            let v = u32::from(value);
+            self.write(addr & !0x3, v << 24 | v << 16 | v << 8 | v);
+        }
+    }
+
+    pub fn write16(&mut self, addr: u32, value: u16) {
+        if addr & !0x3FFF == base::DMA0 {
+            self.edma.write16(addr & 0x3FFF, value);
+        } else {
+            let v = u32::from(value);
+            self.write(addr & !0x3, v << 16 | v);
         }
     }
 
@@ -388,6 +440,12 @@ impl Peripherals {
         }
         if self.lpspi[1].irq_pending() {
             m.set(irq::LPSPI2);
+        }
+        let dma = self.edma.irq_lines16();
+        for ch in 0..16u32 {
+            if dma & (1 << ch) != 0 {
+                m.set(ch); // DMAn_DMAn+16 = IRQ n
+            }
         }
         // GPIO1..2 combined lines (0..15 / 16..31). GPIO3+ combined lines
         // land in the ROADMAP as their pin banks come online.

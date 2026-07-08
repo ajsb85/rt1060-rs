@@ -155,9 +155,30 @@ impl SystemBus {
     fn periph_write(&mut self, addr: u32, value: u32) {
         if Self::is_periph(addr) {
             self.periph.write(addr, value);
+            self.dma_trigger(addr);
         } else {
             self.unmapped("write", addr);
         }
+    }
+
+    /// A write into the eDMA window may have set `TCD.CSR.START` / `SSRT` —
+    /// service the engine at strobe time (like the mg24-rs LDMA), moving data
+    /// through the full bus. The engine is swapped out so it can borrow the
+    /// bus for descriptor + FIFO access.
+    #[inline]
+    fn dma_trigger(&mut self, addr: u32) {
+        if addr & !0x3FFF == crate::peripherals::base::DMA0 {
+            self.edma_service();
+        }
+    }
+
+    /// One eDMA service pass (currently software-started channels only; the
+    /// per-channel hardware-request slice is empty until DMAMUX request
+    /// routing lands — ROADMAP).
+    pub fn edma_service(&mut self) {
+        let mut engine = std::mem::take(&mut self.periph.edma);
+        engine.service(self, &[]);
+        self.periph.edma = engine;
     }
 
     // --- accessors (little-endian; unaligned OK inside RAM-like regions) ----
@@ -181,9 +202,14 @@ impl SystemBus {
         if let Some(bytes) = self.ram_slice(addr, 2) {
             return u16::from_le_bytes(bytes.try_into().unwrap());
         }
-        // Narrow IO reads return the addressed lanes of the 32-bit register.
-        let word = self.periph_read(addr & !0x3);
-        (word >> ((addr & 0x2) * 8)) as u16
+        // Peripheral narrow reads are width-aware (see Peripherals::read16 —
+        // ordinary word registers extract lanes; the eDMA TCD is byte-exact).
+        if Self::is_periph(addr) {
+            self.periph.read16(addr)
+        } else {
+            self.unmapped("read", addr);
+            0
+        }
     }
 
     pub fn write16(&mut self, addr: u32, value: u16) {
@@ -191,17 +217,24 @@ impl SystemBus {
             bytes.copy_from_slice(&value.to_le_bytes());
             return;
         }
-        // Narrow IO writes replicate across the bus lanes (matches rp2350-rs).
-        let v = u32::from(value);
-        self.periph_write(addr & !0x3, v << 16 | v);
+        if Self::is_periph(addr) {
+            self.periph.write16(addr, value);
+            self.dma_trigger(addr);
+        } else {
+            self.unmapped("write", addr);
+        }
     }
 
     pub fn read8(&mut self, addr: u32) -> u8 {
         if let Some(bytes) = self.ram_slice(addr, 1) {
             return bytes[0];
         }
-        let word = self.periph_read(addr & !0x3);
-        (word >> ((addr & 0x3) * 8)) as u8
+        if Self::is_periph(addr) {
+            self.periph.read8(addr)
+        } else {
+            self.unmapped("read", addr);
+            0
+        }
     }
 
     pub fn write8(&mut self, addr: u32, value: u8) {
@@ -209,8 +242,35 @@ impl SystemBus {
             bytes[0] = value;
             return;
         }
-        let v = u32::from(value);
-        self.periph_write(addr & !0x3, v << 24 | v << 16 | v << 8 | v);
+        if Self::is_periph(addr) {
+            self.periph.write8(addr, value);
+            self.dma_trigger(addr);
+        } else {
+            self.unmapped("write", addr);
+        }
+    }
+}
+
+/// The eDMA moves data through full bus dispatch — descriptors in SRAM,
+/// peripheral FIFO registers as endpoints — so the bus *is* the DMA's memory.
+impl crate::peripherals::edma::DmaMem for SystemBus {
+    fn read8(&mut self, addr: u32) -> u8 {
+        SystemBus::read8(self, addr)
+    }
+    fn read16(&mut self, addr: u32) -> u16 {
+        SystemBus::read16(self, addr)
+    }
+    fn read32(&mut self, addr: u32) -> u32 {
+        SystemBus::read32(self, addr)
+    }
+    fn write8(&mut self, addr: u32, value: u8) {
+        SystemBus::write8(self, addr, value)
+    }
+    fn write16(&mut self, addr: u32, value: u16) {
+        SystemBus::write16(self, addr, value)
+    }
+    fn write32(&mut self, addr: u32, value: u32) {
+        SystemBus::write32(self, addr, value)
     }
 }
 

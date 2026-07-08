@@ -115,6 +115,39 @@ fn gpt_counts_in_the_perclk_domain() {
 }
 
 #[test]
+fn edma_moves_a_block_through_the_bus() {
+    const DMA: u32 = 0x400E_8000;
+    let mut soc = Rt1060::new();
+    soc.quiet();
+    // Eight source words in SDRAM.
+    let (src, dst) = (0x8000_0000, 0x8000_1000);
+    for i in 0..8u32 {
+        soc.bus.write32(src + i * 4, 0x1000 + i);
+    }
+    // Program TCD channel 0 through the bus (32-bit and packed-16-bit fields).
+    let tcd = DMA + 0x1000;
+    soc.bus.write32(tcd, src); // SADDR (offset 0x00)
+    soc.bus.write16(tcd + 0x04, 4); // SOFF = +4
+    soc.bus.write16(tcd + 0x06, (2 << 8) | 2); // ATTR: SSIZE=DSIZE=32-bit
+    soc.bus.write32(tcd + 0x08, 32); // NBYTES = 32 (8 words)
+    soc.bus.write32(tcd + 0x10, dst); // DADDR
+    soc.bus.write16(tcd + 0x14, 4); // DOFF = +4
+    soc.bus.write16(tcd + 0x16, 1); // CITER = 1
+    soc.bus.write16(tcd + 0x1E, 1); // BITER = 1
+    soc.bus.write16(tcd + 0x1C, 1 << 1); // CSR: INTMAJOR
+    // Software start via the SSRT action register (byte at 0x1D) → the bus
+    // services the engine at strobe time.
+    soc.bus.write8(DMA + 0x1D, 0);
+    for i in 0..8u32 {
+        assert_eq!(soc.bus.read32(dst + i * 4), 0x1000 + i, "word {i} DMA'd");
+    }
+    // Major-complete interrupt latched for channel 0 → DMA IRQ 0.
+    assert_ne!(soc.bus.read32(DMA + 0x24) & 1, 0, "INT[0] pending");
+    use rt1060_rs::cortex_m::Bus;
+    assert!(soc.bus.irq_lines().test(0), "DMA0 = IRQ 0");
+}
+
+#[test]
 fn rgb_led_red_turns_on_active_low() {
     let mut soc = Rt1060::new();
     soc.quiet();
