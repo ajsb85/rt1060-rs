@@ -30,10 +30,25 @@ pub mod board {
     pub const LED_RED: u8 = 44;
     pub const LED_GREEN: u8 = 45;
     pub const LED_BLUE: u8 = 46;
-    /// Download-status LED.
+    /// Download-status LED. Its pad is not published in any workspace source
+    /// (only in the compiled HAL archive), so it is intentionally unmapped.
     pub const LED_DL: u8 = 47;
     /// Total user-exposed GPIO count.
     pub const IO_PINS: u8 = 44;
+
+    /// The RGB LED is wired to **GPIO1** pins 9/10/11 via pads
+    /// `GPIO_AD_B0_09/10/11` at ALT5 (mux offsets 0x0E0/0x0E4/0x0E8), and is
+    /// **active-low** — a pin driven low turns its LED on. Sources: Zephyr
+    /// `boards/arm/mm_swiftio/{mm_swiftio.dts,pinmux.c}` and the SwiftIO
+    /// `01LED/RGBLED` example (`DigitalOut(value: true)` = off).
+    ///
+    /// The full SwiftIO id 0..43 → (GPIO, pin) table lives only inside the
+    /// prebuilt HAL archive (`lib..__HalSwiftIO__driver__zephyr.a`) and is
+    /// deliberately not reconstructed by guesswork — it is a ROADMAP task.
+    pub const RGB_GPIO: u8 = 1; // GPIO1
+    pub const RGB_RED_PIN: u8 = 9;
+    pub const RGB_GREEN_PIN: u8 = 10;
+    pub const RGB_BLUE_PIN: u8 = 11;
 }
 
 pub struct Rt1060 {
@@ -133,6 +148,19 @@ impl Rt1060 {
         for &b in bytes {
             self.bus.periph.lpuart[0].rx_push(b);
         }
+    }
+
+    /// The onboard RGB LED **on** states `(red, green, blue)`. The LED is
+    /// active-low, so a channel is on when its GPIO1 pin is driven low (and
+    /// configured as an output). See [`board`] for the wiring/sources.
+    pub fn led_rgb(&self) -> (bool, bool, bool) {
+        let g = &self.bus.periph.gpio[(board::RGB_GPIO - 1) as usize];
+        let on = |pin: u8| g.is_output(pin) && !g.output(pin);
+        (
+            on(board::RGB_RED_PIN),
+            on(board::RGB_GREEN_PIN),
+            on(board::RGB_BLUE_PIN),
+        )
     }
 }
 

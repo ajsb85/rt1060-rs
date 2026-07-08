@@ -32,8 +32,10 @@ Milestone tracking lives in [`ROADMAP.md`](ROADMAP.md). Snapshot:
 | Memory map + AIPS bus (ITCM/DTCM/OCRAM/FlexSPI/SDRAM) | ✅ |
 | Loader (ELF32, raw bin, MadMachine `micro.img`) | ✅ |
 | LPUART (console), GPIO, CCM, GPT, SRC, WDOG | ✅ starter models |
-| CCM_ANALOG PLLs, IOMUXC, GPC, SNVS, … | ⏳ stored-readback |
-| DMA (eDMA), LPSPI/LPI2C, USDHC (SD), USB, SEMC/SDRAM init | ⬜ ROADMAP |
+| CCM_ANALOG PLLs (LOCK/OSC/DCDC), SEMC status, boot spin-loops | ✅ terminate |
+| RGB LED observable (GPIO1 9/10/11, active-low) via `led_rgb()` | ✅ |
+| Clock-tree frequency math, IOMUXC full pin table | ⏳ |
+| DMA (eDMA), LPSPI/LPI2C, USDHC (SD), USB, SEMC command decode | ⬜ ROADMAP |
 | Double-precision FPU (FPv5-D16) | ⬜ ROADMAP (SwiftIO builds soft-float) |
 | GDB stub, WASM front-end | ⬜ ROADMAP |
 | Boot a real SwiftIO Micro image | ⬜ ROADMAP |

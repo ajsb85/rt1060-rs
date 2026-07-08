@@ -56,14 +56,26 @@ Ported from the mg24-rs Cortex-M33 core (shared Thumb-2 mainline + DSP ISA).
 - [x] CCM_ANALOG (PLL LOCK bits seeded), IOMUXC, GPC, SNVS, DCDC, OCOTP, PIT
       as stored-readback `RawRegs`
 
-## M5 — Clock tree & board bring-up ⬜
+## M5 — Clock tree & board bring-up ⏳
 
-- [ ] CCM_ANALOG PLL/PFD model (ARM PLL 600 MHz, SYS PLL, USB/ENET/AUDIO)
-- [ ] CCM clock-root dividers feeding GPT/PIT/LPUART baud
-- [ ] SEMC controller + SDRAM init handshake (so a bootloader path works)
-- [ ] IOMUXC pad mux + the SwiftIO id → (GPIO, pin) map (extract from
-      `../mm-sdk/boards/SwiftIOMicro/lib/.../libboards__arm__mm_feather.a`)
-- [ ] Observable RGB LED (SwiftIO ids 44/45/46, active-low) and 44-pin table
+Boot-time spin-loops all terminate (verified end-to-end in `tests/bringup.rs`
+against the exact poll bits `fsl_clock.c` / `fsl_semc.c` / `clock_config.c`
+use). Frequency math and the full pin table remain.
+
+- [x] CCM_ANALOG model: SET/CLR/TOG register-quad aliases + forced PLL LOCK
+      (bit 31, every PLL), MISC0 `OSC_XTALOK` (bit 15), `LOWPWR_CTRL`
+      `XTALOSC_PWRUP_STAT` (bit 16)
+- [x] CCM handshake: CDHIPR reads not-busy so `CLOCK_SetDiv`/`SetMux` exit
+- [x] DCDC `REG0.STS_DC_OK` (bit 31) forced so the VDD_SOC ramp poll exits
+- [x] SEMC status: `MCR.SWRST` self-clear, `INTR.IPCMDDONE` on keyed IPCMD,
+      `STS0.IDLE`; SDRAM stays pre-mapped RAM
+- [x] IOMUXC pad mux (stored-readback) + observable **RGB LED** = GPIO1
+      pins 9/10/11 (pads `GPIO_AD_B0_09/10/11`, active-low) via `led_rgb()`
+- [ ] CCM_ANALOG PLL/PFD **frequency** math (ARM PLL 600 MHz, SYS/USB/ENET)
+- [ ] CCM clock-root dividers feeding GPT/PIT/LPUART baud (real time base)
+- [ ] Full SwiftIO id 0..43 → (GPIO, pin) table (needs HAL archive extract:
+      `../mm-sdk/boards/SwiftIOMicro/lib/.../lib..__HalSwiftIO__driver__zephyr.a`)
+- [ ] SEMC real command decode / SDRAM refresh timing (beyond status)
 
 ## M6 — DMA & serial/analog peripherals ⬜
 

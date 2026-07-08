@@ -21,10 +21,12 @@
 //! `../legacy-mcux-sdk/devices/MIMXRT1062/MIMXRT1062.h` and the SVD
 //! `../mcux-soc-svd/MIMXRT1062/MIMXRT1062.xml`; cite offsets in comments.
 
+pub mod analog;
 pub mod ccm;
 pub mod gpio;
 pub mod gpt;
 pub mod lpuart;
+pub mod semc;
 pub mod src;
 pub mod wdog;
 
@@ -84,6 +86,7 @@ pub mod base {
     pub const GPC: u32 = 0x400F_4000;
     pub const SRC: u32 = 0x400F_8000;
     pub const CCM: u32 = 0x400F_C000;
+    pub const SEMC: u32 = 0x402F_0000;
     pub const LPUART1: u32 = 0x4018_4000;
     pub const LPUART2: u32 = 0x4018_8000;
     pub const LPUART3: u32 = 0x4018_C000;
@@ -130,7 +133,7 @@ pub mod irq {
 /// All peripheral state, routed by 16 KiB-aligned base address.
 pub struct Peripherals {
     pub ccm: ccm::Ccm,
-    pub ccm_analog: RawRegs,
+    pub ccm_analog: analog::CcmAnalog,
     pub iomuxc: RawRegs,
     pub iomuxc_gpr: RawRegs,
     pub src: src::Src,
@@ -139,6 +142,7 @@ pub struct Peripherals {
     pub dcdc: RawRegs,
     pub ocotp: RawRegs,
     pub pit: RawRegs,
+    pub semc: semc::Semc,
     pub gpt: [gpt::Gpt; 2],
     pub wdog1: wdog::Wdog,
     pub wdog2: wdog::Wdog,
@@ -166,25 +170,20 @@ impl Peripherals {
     pub fn new() -> Self {
         Self {
             ccm: ccm::Ccm::new(),
-            // CCM_ANALOG reset: PLL lock bits are polled at boot. Seed the
-            // ARM PLL / SYS PLL / USB PLL lock bits so spin-loops pass
-            // (CCM_ANALOG_PLL_*_LOCK bit 31). Refined in the clock milestone.
-            ccm_analog: RawRegs::new("ccm_analog")
-                .with(0x000, 1 << 31) // PLL_ARM: LOCK
-                .with(0x010, 1 << 31) // PLL_USB1: LOCK
-                .with(0x020, 1 << 31) // PLL_USB2: LOCK
-                .with(0x030, 1 << 31) // PLL_SYS: LOCK
-                .with(0x070, 1 << 31) // PLL_AUDIO: LOCK
-                .with(0x0A0, 1 << 31) // PLL_VIDEO: LOCK
-                .with(0x0E0, 1 << 31), // PLL_ENET: LOCK
+            ccm_analog: analog::CcmAnalog::new(),
             iomuxc: RawRegs::new("iomuxc"),
             iomuxc_gpr: RawRegs::new("iomuxc_gpr"),
             src: src::Src::new(),
             gpc: RawRegs::new("gpc"),
             snvs: RawRegs::new("snvs"),
-            dcdc: RawRegs::new("dcdc"),
+            // DCDC: firmware raises VDD_SOC then spins on REG0.STS_DC_OK
+            // (bit 31) before clocking to 600 MHz (clock_config.c). Seed it
+            // set so the loop exits. A DCDC_Init that rewrites REG0 would need
+            // a real model (ROADMAP).
+            dcdc: RawRegs::new("dcdc").with(0x00, 1 << 31),
             ocotp: RawRegs::new("ocotp"),
             pit: RawRegs::new("pit"),
+            semc: semc::Semc::new(),
             gpt: [gpt::Gpt::new(), gpt::Gpt::new()],
             wdog1: wdog::Wdog::new(wdog::Kind::Wdog),
             wdog2: wdog::Wdog::new(wdog::Kind::Wdog),
@@ -210,9 +209,13 @@ impl Peripherals {
             base::SRC => self.src.read(off),
             base::GPC => self.gpc.read(off),
             base::SNVS => self.snvs.read(off),
+            // DCDC REG0.STS_DC_OK (bit 31) is force-asserted so the VDD_SOC
+            // ramp poll always exits, even if a driver rewrote REG0.
+            base::DCDC if off == 0 => self.dcdc.read(off) | (1 << 31),
             base::DCDC => self.dcdc.read(off),
             base::OCOTP => self.ocotp.read(off),
             base::PIT => self.pit.read(off),
+            base::SEMC => self.semc.read(off),
             base::GPT1 => self.gpt[0].read(off),
             base::GPT2 => self.gpt[1].read(off),
             base::WDOG1 => self.wdog1.read(off),
@@ -242,6 +245,7 @@ impl Peripherals {
             base::DCDC => self.dcdc.write(off, value),
             base::OCOTP => self.ocotp.write(off, value),
             base::PIT => self.pit.write(off, value),
+            base::SEMC => self.semc.write(off, value),
             base::GPT1 => self.gpt[0].write(off, value),
             base::GPT2 => self.gpt[1].write(off, value),
             base::WDOG1 => self.wdog1.write(off, value),
