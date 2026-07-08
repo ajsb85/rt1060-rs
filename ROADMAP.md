@@ -76,8 +76,13 @@ use). Frequency math and the full pin table remain.
 - [x] CCM clock roots (core/AHB/IPG/PERCLK/UART) feeding GPT/PIT time base
       via a per-domain fractional cycle converter in `Peripherals::tick`
 - [ ] PLL2/PLL3 PFD fractional-divider math (currently nominal frequencies)
-- [ ] Full SwiftIO id 0..43 → (GPIO, pin) table (needs HAL archive extract:
-      `../mm-sdk/boards/SwiftIOMicro/lib/.../lib..__HalSwiftIO__driver__zephyr.a`)
+- [x] SwiftIO Micro hardware pin assignments transcribed from the Zephyr
+      board `../zephyr/boards/arm/mm_feather/{mm_feather.dts,pinmux.c}`
+      (RGB LED, console LPUART1, I²C1/3, LPSPI3/4, SD/USDHC1 + card-detect,
+      SAI1/I²S, FlexPWM/GPT/ADC/USB1) → `board::pinmux`
+- [ ] SwiftIO *logical* id `D0..D43` → pad ordering: only in the prebuilt
+      HalSwiftIO `swifthal_gpio_open` driver + the SwiftIOPinout image; a thin
+      translation layer over the (now-mapped) hardware pins — do not guess
 - [ ] SEMC real command decode / SDRAM refresh timing (beyond status)
 
 ## M6 — DMA & serial/analog peripherals ⏳

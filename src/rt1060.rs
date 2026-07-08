@@ -13,11 +13,18 @@ use crate::memory::SystemBus;
 
 /// MadMachine SwiftIO Micro board constants.
 ///
-/// SwiftIO Micro: NXP RT1062 Cortex-M7 @ 600 MHz, 32 MB SDRAM, 16 MB FlexSPI
-/// NOR, onboard RGB LED (active-low), 44 IO pins. The RGB LED and pin ids
-/// below are the SwiftIO logical ids (MadBoards `SwiftIOMicro`); the id →
-/// (GPIO controller, pin) pad map is compiled into the Zephyr board archive
-/// and is extracted in the ROADMAP's board-bring-up milestone.
+/// SwiftIO Micro: NXP RT1062 Cortex-M7 @ 600 MHz, 32 MB SDRAM (Micron
+/// MT48LC16M16A2), 16 MB FlexSPI NOR (ISSI IS25WP128, JEDEC `9d 70 17`),
+/// onboard RGB LED (active-low), 44 IO pins.
+///
+/// **SwiftIO runs on Zephyr**, so the authoritative hardware pin assignments
+/// are MadMachine's Zephyr board `mm_feather` (the Micro's internal name):
+/// `../zephyr/boards/arm/mm_feather/{mm_feather.dts,pinmux.c}`. The concrete
+/// pads below are transcribed from there (see [`board::pinmux`]). The SwiftIO
+/// *logical* id (`D0`..`D43`, MadBoards `SwiftIOMicro`) → pad ordering is
+/// resolved inside the prebuilt HalSwiftIO `swifthal_gpio_open(id)` driver
+/// (`.a`) plus the `SwiftIOPinout` image — that thin translation layer is not
+/// in machine-readable source form; do not guess it (ROADMAP).
 pub mod board {
     /// Core clock the SwiftIO Micro configures (600 MHz ARM PLL).
     pub const CORE_CLOCK_HZ: u64 = 600_000_000;
@@ -37,18 +44,42 @@ pub mod board {
     pub const IO_PINS: u8 = 44;
 
     /// The RGB LED is wired to **GPIO1** pins 9/10/11 via pads
-    /// `GPIO_AD_B0_09/10/11` at ALT5 (mux offsets 0x0E0/0x0E4/0x0E8), and is
-    /// **active-low** — a pin driven low turns its LED on. Sources: Zephyr
-    /// `boards/arm/mm_swiftio/{mm_swiftio.dts,pinmux.c}` and the SwiftIO
+    /// `GPIO_AD_B0_09/10/11` at ALT5, and is **active-low** — a pin driven low
+    /// turns its LED on. Source: `mm_feather/{mm_feather.dts,pinmux.c}`
+    /// (`red_led = &gpio1 9`, `green = 10`, `blue = 11`) + the SwiftIO
     /// `01LED/RGBLED` example (`DigitalOut(value: true)` = off).
-    ///
-    /// The full SwiftIO id 0..43 → (GPIO, pin) table lives only inside the
-    /// prebuilt HAL archive (`lib..__HalSwiftIO__driver__zephyr.a`) and is
-    /// deliberately not reconstructed by guesswork — it is a ROADMAP task.
     pub const RGB_GPIO: u8 = 1; // GPIO1
     pub const RGB_RED_PIN: u8 = 9;
     pub const RGB_GREEN_PIN: u8 = 10;
     pub const RGB_BLUE_PIN: u8 = 11;
+
+    /// Concrete pad / GPIO assignments transcribed from the SwiftIO Micro
+    /// Zephyr board `mm_feather` (`pinmux.c` + `mm_feather.dts`). These are the
+    /// hardware-truth pins; the SwiftIO logical-id ordering that maps onto them
+    /// lives in the prebuilt HalSwiftIO driver (see the module docs).
+    pub mod pinmux {
+        /// LPUART1 is the console (`zephyr,console`): TX = `GPIO_AD_B0_12`,
+        /// RX = `GPIO_AD_B0_13`.
+        pub const CONSOLE_LPUART: u8 = 1;
+        /// LPI2C1: SCL = `GPIO_AD_B1_00`, SDA = `GPIO_AD_B1_01`.
+        /// LPI2C3: SCL = `GPIO_AD_B1_07`, SDA = `GPIO_AD_B1_06`.
+        pub const I2C_INSTANCES: [u8; 2] = [1, 3];
+        /// SPI buses wired out: LPSPI3 and LPSPI4.
+        pub const SPI_INSTANCES: [u8; 2] = [3, 4];
+        /// SD card on **USDHC1**; card-detect on `GPIO2` pin 28
+        /// (`GPIO_B1_12`, active-low), card power on `GPIO1` pin 5
+        /// (`GPIO_AD_B0_05`).
+        pub const SD_USDHC: u8 = 1;
+        pub const SD_CARD_DETECT_GPIO: u8 = 2;
+        pub const SD_CARD_DETECT_PIN: u8 = 28;
+        pub const SD_POWER_GPIO: u8 = 1;
+        pub const SD_POWER_PIN: u8 = 5;
+        /// I²S is `SAI1` (`i2s_rxtx = &sai1`).
+        pub const I2S_SAI: u8 = 1;
+        /// FlexPWM submodules enabled: PWM1_3, PWM2_0..3, PWM4_0..3 (14 PWM).
+        /// GPT1/GPT2, ADC1/ADC2, and USB1 are all enabled.
+        pub const USB_OTG: u8 = 1;
+    }
 }
 
 pub struct Rt1060 {
