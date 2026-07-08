@@ -21,6 +21,7 @@
 //! `../legacy-mcux-sdk/devices/MIMXRT1062/MIMXRT1062.h` and the SVD
 //! `../mcux-soc-svd/MIMXRT1062/MIMXRT1062.xml`; cite offsets in comments.
 
+pub mod adc;
 pub mod analog;
 pub mod ccm;
 pub mod clocks;
@@ -78,6 +79,8 @@ impl RawRegs {
 /// on `addr & !0x3FFF`, so every entry here is 16 KiB-aligned.
 pub mod base {
     // AIPS-1 .. AIPS-4 modeled blocks (subset; extend per ROADMAP).
+    pub const ADC1: u32 = 0x400C_4000;
+    pub const ADC2: u32 = 0x400C_8000;
     pub const DCDC: u32 = 0x4008_0000;
     pub const DMA0: u32 = 0x400E_8000;
     pub const DMAMUX: u32 = 0x400E_C000;
@@ -136,6 +139,8 @@ pub mod irq {
     pub const GPIO1_COMBINED_16_31: u32 = 81;
     pub const GPIO2_COMBINED_0_15: u32 = 82;
     pub const GPIO2_COMBINED_16_31: u32 = 83;
+    pub const ADC1: u32 = 67;
+    pub const ADC2: u32 = 68;
     pub const GPT1: u32 = 100;
     pub const GPT2: u32 = 101;
     pub const PIT: u32 = 122;
@@ -164,6 +169,8 @@ pub struct Peripherals {
     pub lpi2c: [lpi2c::LpI2c; 2],
     /// LPSPI1/2 (index 0 = LPSPI1).
     pub lpspi: [lpspi::LpSpi; 2],
+    /// ADC1/2 (index 0 = ADC1).
+    pub adc: [adc::Adc; 2],
     pub gpt: [gpt::Gpt; 2],
     pub wdog1: wdog::Wdog,
     pub wdog2: wdog::Wdog,
@@ -216,6 +223,7 @@ impl Peripherals {
             semc: semc::Semc::new(),
             lpi2c: [lpi2c::LpI2c::new(1), lpi2c::LpI2c::new(2)],
             lpspi: [lpspi::LpSpi::new(1), lpspi::LpSpi::new(2)],
+            adc: [adc::Adc::new(1), adc::Adc::new(2)],
             gpt: [gpt::Gpt::new(), gpt::Gpt::new()],
             wdog1: wdog::Wdog::new(wdog::Kind::Wdog),
             wdog2: wdog::Wdog::new(wdog::Kind::Wdog),
@@ -273,6 +281,8 @@ impl Peripherals {
             base::LPI2C2 => self.lpi2c[1].read(off),
             base::LPSPI1 => self.lpspi[0].read(off),
             base::LPSPI2 => self.lpspi[1].read(off),
+            base::ADC1 => self.adc[0].read(off),
+            base::ADC2 => self.adc[1].read(off),
             base::GPT1 => self.gpt[0].read(off),
             base::GPT2 => self.gpt[1].read(off),
             base::WDOG1 => self.wdog1.read(off),
@@ -309,6 +319,8 @@ impl Peripherals {
             base::LPI2C2 => self.lpi2c[1].write(off, value),
             base::LPSPI1 => self.lpspi[0].write(off, value),
             base::LPSPI2 => self.lpspi[1].write(off, value),
+            base::ADC1 => self.adc[0].write(off, value),
+            base::ADC2 => self.adc[1].write(off, value),
             base::GPT1 => self.gpt[0].write(off, value),
             base::GPT2 => self.gpt[1].write(off, value),
             base::WDOG1 => self.wdog1.write(off, value),
@@ -440,6 +452,12 @@ impl Peripherals {
         }
         if self.lpspi[1].irq_pending() {
             m.set(irq::LPSPI2);
+        }
+        if self.adc[0].irq_pending() {
+            m.set(irq::ADC1);
+        }
+        if self.adc[1].irq_pending() {
+            m.set(irq::ADC2);
         }
         let dma = self.edma.irq_lines16();
         for ch in 0..16u32 {
