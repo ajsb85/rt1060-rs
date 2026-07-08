@@ -16,5 +16,25 @@ the same fixture, the emulator is wrong.
 - **NXP SDK LED blink** — `../mcu-boot-utility/apps/.../led_blinky_0x*_iar.elf`
   (RT1050 ≈ RT1062) at ITCM `0x0000_2000` or FlexSPI `0x6000_2000`.
 
-None are committed yet — the current tests build their images in-process
-(`tests/smoke.rs`).
+## Committed fixtures
+
+### `rt1050_led_blinky_itcm.elf`
+
+A real, **unmodified** NXP MCUXpresso SDK LED-blinky for the i.MX RT1050 EVK,
+IAR-built to run from ITCM at `0x0000_2000` (vector table there; reset handler
+`0x0000_4fc0`, initial SP `0x2002_0000`). Copied verbatim from
+`../mcu-boot-utility/apps/NXP_MIMXRT1050-EVKB_Rev.A/led_blinky_0x00002000_iar.elf`.
+
+RT1050 and RT1062 share the Cortex-M7 core and are register-compatible for the
+blocks this image touches (CCM clocks, IOMUXC, GPIO). Exercised by
+`tests/boot_fixture.rs`:
+
+- it boots and runs its clock/pin-mux/GPIO init with **zero unmapped-register
+  or unimplemented-instruction hits**, and configures the EVK user LED
+  (`GPIO1_IO09`) as an output (fast test);
+- run long enough, `GPIO1_IO09` **toggles** — the LED blinks (the `--ignored`
+  deep test, ~250M instructions).
+
+Other bring-up candidates still available (not yet committed): the FlexSPI
+(`0x6000_2000`) and SDRAM (`0x8000_2000`) variants in the same SDK app dir, and
+`../mm-sdk/boards/SerialLoader.bin` (the MadMachine second-stage RAM loader).

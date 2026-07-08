@@ -26,3 +26,4 @@ refs/** linguist-vendored
 
 # Never diff lockfile noise as language
 Cargo.lock text -diff
+tests/fixtures/*.elf binary

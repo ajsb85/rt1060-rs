@@ -100,8 +100,12 @@ use). Frequency math and the full pin table remain.
 - [ ] FlexSPI controller register model + XIP program/erase
 - [ ] ENET, CAN (FlexCAN), I²S (SAI)
 
-## M8 — Boot a real SwiftIO image ⬜
+## M8 — Boot real firmware ⏳
 
+- [x] **Boot a real, unmodified NXP SDK Cortex-M7 image** (RT1050 EVK LED
+      blinky, ITCM `0x2000`): runs clock/pin-mux/GPIO init with **zero
+      unmapped-register / unimplemented-instruction hits** and **blinks the
+      LED** (`GPIO1_IO09` toggles) — `tests/boot_fixture.rs`, `examples/probe.rs`
 - [ ] Boot the MadMachine bootloader ("eboot") from FlexSPI flash
 - [ ] Two-stage boot: verify `micro.img`, copy to SDRAM, jump to `__start`
 - [ ] Bring Zephyr up to `PRE_KERNEL → APPLICATION`; assert console banner
