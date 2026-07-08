@@ -117,3 +117,93 @@ fn teensy41_blink_matches_the_hardware_led_cadence() {
         );
     }
 }
+
+// --- SwiftIO stack on the Teensy 4.1 ----------------------------------------
+//
+// The real MadMachine SwiftIO stack (`import SwiftIO` + HalSwiftIO + Zephyr +
+// embedded Swift), re-based off SDRAM to run from the RT1062's dedicated 512 KB
+// OCRAM at 0x2020_0000, wrapped in a Teensy flash image (FlexSPI config + IVT +
+// a first-stage that copies the payload into OCRAM and jumps). The Swift program
+// is `DigitalOut(Id.D16)` — SwiftIO id D16 = GPIO2 IO3 = pad GPIO_B0_03 = the
+// Teensy onboard LED. Build + flash provenance: `fixtures/swiftio_teensy_src/`.
+// Flashed to the physical Teensy 4.1 with `teensy_loader_cli`; the onboard LED
+// blinks at 1 Hz, matching this emulation.
+const SWIFTIO: &[u8] = include_bytes!("fixtures/swiftio_teensy_blink.elf");
+
+/// SwiftIO id D16 → GPIO2 IO3, the pad the onboard LED sits on.
+const SWIFTIO_LED_ID: u8 = 16;
+
+/// The Teensy-packaged SwiftIO image boots via the i.MX RT Boot ROM → IVT: the
+/// first-stage copies the OCRAM payload into `0x2020_0000` and hands off to the
+/// SwiftIO/Zephyr stack, which comes up (littlefs mounts) and runs from OCRAM
+/// with **zero unimplemented instructions** — no SDRAM required.
+#[test]
+fn swiftio_stack_boots_on_teensy_from_ocram() {
+    let image = loader::load_elf(SWIFTIO).expect("parse ELF");
+    assert_eq!(image.entry, Some(0x6000_1000), "ELF e_entry = IVT");
+    let mut soc = Rt1060::cold_boot_from_ivt(&image).expect("i.MX RT IVT boot");
+    soc.quiet();
+
+    let mut min_pc = u32::MAX;
+    for _ in 0..40_000_000 {
+        soc.step();
+        if let Some(BreakCause::Unimplemented(hw)) = soc.core.break_cause {
+            panic!(
+                "unimplemented instruction {hw:#06x} at PC {:#010x}",
+                soc.core.regs[15]
+            );
+        }
+        min_pc = min_pc.min(soc.core.regs[15]);
+    }
+    // The first-stage jumped into the SwiftIO image running from OCRAM.
+    assert!(
+        (0x2020_0000..0x2028_0000).contains(&min_pc),
+        "executing from OCRAM (min PC {min_pc:#010x})"
+    );
+    // The full Zephyr/SwiftIO stack reached its filesystem init.
+    let console = soc.console_string();
+    assert!(
+        console.contains("mounted"),
+        "SwiftIO/Zephyr stack booted (littlefs mounted); console:\n{console}"
+    );
+}
+
+/// **HIL parity:** on the physical Teensy the same image blinks the onboard LED
+/// at 1 Hz (`sleep(ms: 500)`), timed by Zephyr's SysTick off the processor clock
+/// (600 MHz). The emulator reproduces it: `DigitalOut(Id.D16)` (GPIO2 IO3)
+/// toggles every ~500 ms of emulated wall-clock.
+#[test]
+#[ignore = "runs ~700M instructions through Zephyr; cargo test --release -- --ignored"]
+fn swiftio_teensy_blink_toggles_the_onboard_led() {
+    let image = loader::load_elf(SWIFTIO).expect("parse ELF");
+    let mut soc = Rt1060::cold_boot_from_ivt(&image).expect("i.MX RT IVT boot");
+    soc.quiet();
+    let hz = 600_000_000f64; // SwiftIO configures the ARM PLL to 600 MHz
+
+    let mut toggles: Vec<f64> = Vec::new();
+    let mut last = soc.swiftio_pin(SWIFTIO_LED_ID);
+    for _ in 0..1_500_000_000u64 {
+        soc.step();
+        let now = soc.swiftio_pin(SWIFTIO_LED_ID);
+        if now != last {
+            toggles.push(soc.cycles as f64 / hz * 1000.0);
+            last = now;
+            if toggles.len() >= 4 {
+                break;
+            }
+        }
+    }
+    assert!(
+        toggles.len() >= 4,
+        "expected >=4 LED transitions, saw {}",
+        toggles.len()
+    );
+    // The steady blink interval (after the initial power-on drive) is 500 ms.
+    for w in toggles.windows(2).skip(1) {
+        let dt = w[1] - w[0];
+        assert!(
+            (dt - 500.0).abs() < 5.0,
+            "blink interval should be 500 ms (sleep(ms:500)), saw {dt:.2} ms"
+        );
+    }
+}

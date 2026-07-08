@@ -52,6 +52,7 @@ Milestone tracking lives in [`ROADMAP.md`](ROADMAP.md). Snapshot:
 | **GDB remote stub** + `RT1060_TRACE` logging + criterion benches | ✅ |
 | SwiftIO 44-pin map (id→GPIO, from HAL static analysis) via `swiftio_pin()` | ✅ |
 | **HIL parity vs a physical Teensy 4.1** (same MIMXRT1062) — boots PJRC's unmodified Arduino blinky via the i.MX RT Boot ROM → IVT path (`cold_boot_from_ivt`) and reproduces the **exact LED cadence** (SysTick 100 kHz external clock); cross-checked against the board flashed with the same `.hex` | ✅ |
+| **Real MadMachine SwiftIO stack on a Teensy 4.1** — `import SwiftIO`/Zephyr re-based off SDRAM into OCRAM + wrapped as a Teensy flash image; boots with zero unimplemented instructions and blinks the onboard LED (`DigitalOut(Id.D16)`); flashed to the physical board, LED blinks at 1 Hz | ✅ |
 | USB CDC enumeration, SEMC real command decode, ENET | ⬜ ROADMAP |
 | MadMachine two-stage bootloader (eboot); WASM front-end; SwiftIO USB-serial HIL | ⬜ ROADMAP |
 

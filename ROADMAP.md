@@ -168,6 +168,15 @@ use). Frequency math and the full pin table remain.
       `CBCMR` wasn't seeded to its reset value (core clock mis-resolved to PLL2
       528 MHz instead of the ARM PLL 396 MHz). `tests/teensy_hil.rs`,
       `examples/teensy.rs`
+- [x] **Run the real MadMachine SwiftIO stack on a Teensy 4.1** — `import SwiftIO`
+      + HalSwiftIO + Zephyr + embedded Swift, re-based off SDRAM into the RT1062's
+      dedicated 512 KB OCRAM (`0x2020_0000`) and wrapped in a Teensy flash image
+      (FlexSPI config + IVT + a first-stage that stages the payload into OCRAM).
+      Boots via `cold_boot_from_ivt` with **zero unimplemented instructions** and
+      blinks the onboard LED (`DigitalOut(Id.D16)` = GPIO2 IO3 = pad `GPIO_B0_03`)
+      at 500 ms. Cross-checked on the physical Teensy 4.1 (`teensy_loader_cli`) —
+      onboard LED blinks at 1 Hz. `tests/teensy_hil.rs`,
+      `tests/fixtures/swiftio_teensy_src/`
 - [ ] HIL parity: compare against a physical SwiftIO Micro over USB-serial;
       SwiftIO `11WiFi` (SPI+ESP32)
 

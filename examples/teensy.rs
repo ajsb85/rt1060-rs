@@ -34,11 +34,16 @@ fn main() {
         soc.core.regs[15]
     );
 
-    let led_gpio = 6; // GPIO7 (fast-GPIO mirror of GPIO2); pin 13 = GPIO_B0_03 = bit 3
+    // Pin 13 = pad GPIO_B0_03, driven by GPIO7 IO3 (Teensyduino's fast-GPIO
+    // alias) OR GPIO2 IO3 (the normal alias the SwiftIO HAL uses for Id.D16).
+    // Report the LED as on if either alias drives the pad high.
     let led_pin = 3;
     let led = |soc: &Rt1060| {
-        soc.bus.periph.gpio[led_gpio].is_output(led_pin)
-            && soc.bus.periph.gpio[led_gpio].output(led_pin)
+        let g7 =
+            soc.bus.periph.gpio[6].is_output(led_pin) && soc.bus.periph.gpio[6].output(led_pin);
+        let g2 =
+            soc.bus.periph.gpio[1].is_output(led_pin) && soc.bus.periph.gpio[1].output(led_pin);
+        g7 || g2
     };
 
     let mut unimpl: BTreeMap<u32, (u32, u64)> = BTreeMap::new();
@@ -93,11 +98,7 @@ fn main() {
         "  PC now {:#010x} (range {min_pc:#010x}..{max_pc:#010x})",
         last_pc
     );
-    println!(
-        "  LED (GPIO{}/pin{led_pin}) toggles: {toggles}, now {}",
-        led_gpio + 1,
-        last_led
-    );
+    println!("  LED (pad GPIO_B0_03, pin {led_pin}) toggles: {toggles}, now {last_led}");
     println!(
         "  core_hz={} systick csr={:#x} rvr={}",
         soc.core_hz(),

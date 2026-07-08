@@ -206,3 +206,28 @@ the core to the high-speed **GPIO7** bit 3 (`IOMUXC_GPR_GPR27`).
 `/opt/teensy-tools`, udev rules from `pjrc.com/teensy/00-teensy.rules`) and the
 onboard LED blinks at 5 Hz — the same cadence the emulator reproduces from the
 same build.
+
+### `swiftio_teensy_blink.elf` / `swiftio_teensy_blink.hex` + `swiftio_teensy_src/`
+
+The **real MadMachine SwiftIO stack running on a Teensy 4.1** — `import SwiftIO`,
+HalSwiftIO, Zephyr and embedded Swift, the same software that runs on the SwiftIO
+Micro, ported to Teensy hardware (same MIMXRT1062 SoC, but **no SDRAM**). The
+Swift program is `DigitalOut(Id.D16)` toggled every 500 ms; SwiftIO id **D16 =
+GPIO2 IO3 = pad `GPIO_B0_03` = the Teensy onboard LED** (per
+`board::SWIFTIO_PIN_MAP`), so no HAL change is needed.
+
+Two things make it run on a Teensy: (1) the build is **re-based off SDRAM
+`0x8000_0000` into the RT1062's dedicated 512 KB OCRAM `0x2020_0000`** (the ~406 KB
+image fits); (2) it is wrapped in a Teensy flash image — a FlexSPI config block +
+IVT + a first-stage that copies the OCRAM payload from flash and jumps to it. Full
+build + flash steps: `swiftio_teensy_src/BUILD.md` (`stage.c`, `payload.S`,
+`stage.ld`, `main.swift`; the FlexSPI config / IVT / boot_data are reused from
+`teensy_cores/teensy4/bootdata.c`).
+
+`tests/teensy_hil.rs` boots the image via `Rt1060::cold_boot_from_ivt` (the i.MX RT
+Boot ROM → IVT path): the first-stage stages the payload into OCRAM and the
+SwiftIO/Zephyr stack comes up (littlefs mounts) and runs with **zero unimplemented
+instructions**; the deep `--ignored` test asserts `swiftio_pin(16)` toggles every
+500 ms. **Cross-checked on the physical Teensy 4.1:** flashed with
+`teensy_loader_cli --mcu=TEENSY41 swiftio_teensy_blink.hex`, the onboard LED
+blinks at 1 Hz — the same cadence the emulator reproduces.
