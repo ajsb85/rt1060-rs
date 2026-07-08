@@ -26,6 +26,7 @@ pub mod analog;
 pub mod ccm;
 pub mod clocks;
 pub mod edma;
+pub mod flexcan;
 pub mod gpio;
 pub mod gpt;
 pub mod lpi2c;
@@ -83,6 +84,9 @@ impl RawRegs {
 /// on `addr & !0x3FFF`, so every entry here is 16 KiB-aligned.
 pub mod base {
     // AIPS-1 .. AIPS-4 modeled blocks (subset; extend per ROADMAP).
+    pub const CAN1: u32 = 0x401D_0000;
+    pub const CAN2: u32 = 0x401D_4000;
+    pub const CAN3: u32 = 0x401D_8000;
     pub const ADC1: u32 = 0x400C_4000;
     pub const ADC2: u32 = 0x400C_8000;
     pub const DCDC: u32 = 0x4008_0000;
@@ -167,6 +171,9 @@ pub mod irq {
     pub const USDHC2: u32 = 111;
     pub const USB_OTG1: u32 = 113;
     pub const USB_OTG2: u32 = 112;
+    pub const CAN1: u32 = 36;
+    pub const CAN2: u32 = 37;
+    pub const CAN3: u32 = 154;
 }
 
 // ---------------------------------------------------------------------------
@@ -202,6 +209,8 @@ pub struct Peripherals {
     pub usdhc: [usdhc::Usdhc; 2],
     /// USB1/USB2 OTG controllers (one shared window).
     pub usb: usb::Usb,
+    /// FlexCAN1..3 (index 0 = CAN1).
+    pub flexcan: [flexcan::FlexCan; 3],
     pub gpt: [gpt::Gpt; 2],
     pub wdog1: wdog::Wdog,
     pub wdog2: wdog::Wdog,
@@ -259,6 +268,7 @@ impl Peripherals {
             qtmr: std::array::from_fn(|i| qtmr::Qtmr::new(i as u8 + 1)),
             usdhc: [usdhc::Usdhc::new(1), usdhc::Usdhc::new(2)],
             usb: usb::Usb::new(),
+            flexcan: std::array::from_fn(|i| flexcan::FlexCan::new(i as u8 + 1)),
             gpt: [gpt::Gpt::new(), gpt::Gpt::new()],
             wdog1: wdog::Wdog::new(wdog::Kind::Wdog),
             wdog2: wdog::Wdog::new(wdog::Kind::Wdog),
@@ -315,6 +325,9 @@ impl Peripherals {
             base::USDHC1 => self.usdhc[0].read(off),
             base::USDHC2 => self.usdhc[1].read(off),
             base::USB => self.usb.read(off),
+            base::CAN1 => self.flexcan[0].read(off),
+            base::CAN2 => self.flexcan[1].read(off),
+            base::CAN3 => self.flexcan[2].read(off),
             base::LPI2C1 => self.lpi2c[0].read(off),
             base::LPI2C2 => self.lpi2c[1].read(off),
             base::LPSPI1 => self.lpspi[0].read(off),
@@ -364,6 +377,9 @@ impl Peripherals {
             base::USDHC1 => self.usdhc[0].write(off, value),
             base::USDHC2 => self.usdhc[1].write(off, value),
             base::USB => self.usb.write(off, value),
+            base::CAN1 => self.flexcan[0].write(off, value),
+            base::CAN2 => self.flexcan[1].write(off, value),
+            base::CAN3 => self.flexcan[2].write(off, value),
             base::LPI2C1 => self.lpi2c[0].write(off, value),
             base::LPI2C2 => self.lpi2c[1].write(off, value),
             base::LPSPI1 => self.lpspi[0].write(off, value),
@@ -593,6 +609,11 @@ impl Peripherals {
         }
         if self.usb.irq_pending(1) {
             m.set(irq::USB_OTG2);
+        }
+        for (i, c) in self.flexcan.iter().enumerate() {
+            if c.irq_pending() {
+                m.set([irq::CAN1, irq::CAN2, irq::CAN3][i]);
+            }
         }
         if self.lpi2c[0].irq_pending() {
             m.set(irq::LPI2C1);
