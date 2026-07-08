@@ -29,10 +29,12 @@ const INTEN: u32 = 0x10;
 const INTR: u32 = 0x14;
 const IPCMD: u32 = 0xB0;
 const STS0: u32 = 0xE0;
+const IPRXFSTS: u32 = 0xF0; // IP RX FIFO status (FILL count in low byte)
 
 const MCR0_SWRESET: u32 = 1 << 0;
 const INTR_IPCMDDONE: u32 = 1 << 0;
 const INTR_IPRXWA: u32 = 1 << 5; // RX FIFO watermark available
+const INTR_IPTXWE: u32 = 1 << 6; // TX FIFO watermark empty (write available)
 const STS0_SEQIDLE: u32 = 1 << 0;
 const STS0_ARBIDLE: u32 = 1 << 1;
 const IPCMD_TRG: u32 = 1 << 0;
@@ -55,9 +57,17 @@ impl FlexSpi {
     pub fn read(&mut self, off: u32) -> u32 {
         match off {
             MCR0 => self.regs[0] & !MCR0_SWRESET, // SWRESET self-cleared
-            INTR => self.intr,
+            // The RX watermark is always available and the TX FIFO always has
+            // space (the IP engine serves erased flash endlessly and drains
+            // writes instantly), so FLEXSPI_ReadBlocking / _WriteBlocking's
+            // polls on INTR.IPRXWA (bit 5) / IPTXWE (bit 6) terminate.
+            INTR => self.intr | INTR_IPRXWA | INTR_IPTXWE,
             STS0 => STS0_SEQIDLE | STS0_ARBIDLE, // always idle
-            0x100..=0x17C => 0xFFFF_FFFF,        // IP RX FIFO: erased flash
+            // IPRXFSTS: FILL count (8-byte entries) in the low byte —
+            // FLEXSPI_ReadBlocking waits for `remaining <= FILL*8`. Report the
+            // FIFO as full so the read drains immediately.
+            IPRXFSTS => 0x0000_00FF,
+            0x100..=0x17C => 0xFFFF_FFFF, // IP RX FIFO: erased flash
             _ => self.regs[(off >> 2) as usize & 0xFF],
         }
     }

@@ -14,6 +14,7 @@
 
 const CR_EN: u32 = 1 << 0;
 const CR_ENMOD: u32 = 1 << 1;
+const CR_SWR: u32 = 1 << 15; // software reset (self-clearing; RM §45.5.1)
 /// CR.CLKSRC (bits [8:6], RM §45.5.1): 0 = off, 1 = ipg PERCLK, 4 = low-freq
 /// 32.768 kHz, 5 = 24 MHz crystal; 2/3 (high-freq/external) approximated as
 /// PERCLK for now.
@@ -60,6 +61,12 @@ impl Gpt {
     pub fn write(&mut self, offset: u32, value: u32) {
         match offset {
             0x00 => {
+                // CR.SWR resets the block and self-clears (GPT_Init spins on
+                // `while (CR & SWR)`), so it must never read back set.
+                if value & CR_SWR != 0 {
+                    *self = Gpt::new();
+                    return;
+                }
                 let was_en = self.cr & CR_EN != 0;
                 self.cr = value;
                 if value & CR_EN != 0 && !was_en && value & CR_ENMOD != 0 {

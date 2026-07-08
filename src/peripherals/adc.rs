@@ -9,8 +9,9 @@
 //! on completion; `HCn.AIEN` gates the interrupt (ADC1 = IRQ 67, ADC2 = 68).
 //! Reading `Rn` clears its COCO flag (RM §66). Per-channel input values are
 //! programmable via [`Adc::set_channel`] so firmware/tests can drive analog
-//! inputs. Hardware trigger (ADC_ETC), calibration, and averaging are ROADMAP
-//! items — `CAL`/`CFG`/`GC` are stored-readback.
+//! inputs. Auto-calibration (`GC.CAL`) completes instantly so
+//! `ADC_DoAutoCalibration` returns; hardware trigger (ADC_ETC) and averaging
+//! are ROADMAP items.
 //!
 //! Register map: HC0..7 0x00..0x1C, HS 0x20, R0..7 0x24..0x40, CFG 0x44,
 //! GC 0x48, GS 0x4C, CV 0x50, OFS 0x54, CAL 0x58.
@@ -18,6 +19,7 @@
 const HC_ADCH: u32 = 0x1F; // channel select
 const HC_AIEN: u32 = 1 << 7; // interrupt enable
 const HC_DISABLED: u32 = 0x1F; // ADCH = 0b11111 → conversion disabled
+const GC_CAL: u32 = 1 << 7; // GC.CAL: launch auto-calibration (self-clearing)
 
 /// Number of control/result register pairs (HC0..7 / R0..7).
 const SLOTS: usize = 8;
@@ -84,7 +86,11 @@ impl Adc {
                 self.convert(n);
             }
             0x44 => self.cfg = value,
-            0x48 => self.gc = value,
+            // GC.CAL (bit 7) launches auto-calibration; `ADC_DoAutoCalibration`
+            // then spins `while (GC & CAL)`. Calibration completes instantly
+            // here, so drop CAL on write (self-clear) and leave GS.CALF clear
+            // (fsl_adc.c ADC_DoAutoCalibration).
+            0x48 => self.gc = value & !GC_CAL,
             0x58 => self.cal = value,
             _ => {}
         }
@@ -143,6 +149,18 @@ mod tests {
         assert!(!adc.irq_pending());
         adc.write(0x04, HC_AIEN | 2); // HC1: channel 2 with AIEN
         assert!(adc.irq_pending());
+    }
+
+    #[test]
+    fn auto_calibration_self_clears() {
+        // ADC_DoAutoCalibration: GS = CALF (clear), GC |= CAL, then
+        // `while (GC & CAL)`. CAL must self-clear and GS.CALF stay 0.
+        let mut adc = Adc::new(1);
+        adc.write(0x4C, 0x2); // GS: clear CALF
+        adc.write(0x48, GC_CAL | 0x1); // GC: launch calibration (+ ADACKEN)
+        assert_eq!(adc.read(0x48) & GC_CAL, 0, "CAL self-cleared");
+        assert_ne!(adc.read(0x48) & 0x1, 0, "other GC bits stick");
+        assert_eq!(adc.read(0x4C) & 0x2, 0, "calibration passed (CALF clear)");
     }
 
     #[test]
