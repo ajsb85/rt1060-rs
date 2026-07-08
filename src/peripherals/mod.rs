@@ -27,6 +27,7 @@ pub mod clocks;
 pub mod gpio;
 pub mod gpt;
 pub mod lpi2c;
+pub mod lpspi;
 pub mod lpuart;
 pub mod pit;
 pub mod semc;
@@ -92,6 +93,8 @@ pub mod base {
     pub const SEMC: u32 = 0x402F_0000;
     pub const LPI2C1: u32 = 0x403F_0000;
     pub const LPI2C2: u32 = 0x403F_4000;
+    pub const LPSPI1: u32 = 0x4039_4000;
+    pub const LPSPI2: u32 = 0x4039_8000;
     pub const LPUART1: u32 = 0x4018_4000;
     pub const LPUART2: u32 = 0x4018_8000;
     pub const LPUART3: u32 = 0x4018_C000;
@@ -124,6 +127,8 @@ pub mod irq {
     pub const LPUART1: u32 = 20;
     pub const LPI2C1: u32 = 28;
     pub const LPI2C2: u32 = 29;
+    pub const LPSPI1: u32 = 32;
+    pub const LPSPI2: u32 = 33;
     pub const GPIO1_COMBINED_0_15: u32 = 80;
     pub const GPIO1_COMBINED_16_31: u32 = 81;
     pub const GPIO2_COMBINED_0_15: u32 = 82;
@@ -152,6 +157,8 @@ pub struct Peripherals {
     pub semc: semc::Semc,
     /// LPI2C1/2 (index 0 = LPI2C1).
     pub lpi2c: [lpi2c::LpI2c; 2],
+    /// LPSPI1/2 (index 0 = LPSPI1).
+    pub lpspi: [lpspi::LpSpi; 2],
     pub gpt: [gpt::Gpt; 2],
     pub wdog1: wdog::Wdog,
     pub wdog2: wdog::Wdog,
@@ -201,6 +208,7 @@ impl Peripherals {
             pit: pit::Pit::new(),
             semc: semc::Semc::new(),
             lpi2c: [lpi2c::LpI2c::new(1), lpi2c::LpI2c::new(2)],
+            lpspi: [lpspi::LpSpi::new(1), lpspi::LpSpi::new(2)],
             gpt: [gpt::Gpt::new(), gpt::Gpt::new()],
             wdog1: wdog::Wdog::new(wdog::Kind::Wdog),
             wdog2: wdog::Wdog::new(wdog::Kind::Wdog),
@@ -254,6 +262,8 @@ impl Peripherals {
             base::SEMC => self.semc.read(off),
             base::LPI2C1 => self.lpi2c[0].read(off),
             base::LPI2C2 => self.lpi2c[1].read(off),
+            base::LPSPI1 => self.lpspi[0].read(off),
+            base::LPSPI2 => self.lpspi[1].read(off),
             base::GPT1 => self.gpt[0].read(off),
             base::GPT2 => self.gpt[1].read(off),
             base::WDOG1 => self.wdog1.read(off),
@@ -286,6 +296,8 @@ impl Peripherals {
             base::SEMC => self.semc.write(off, value),
             base::LPI2C1 => self.lpi2c[0].write(off, value),
             base::LPI2C2 => self.lpi2c[1].write(off, value),
+            base::LPSPI1 => self.lpspi[0].write(off, value),
+            base::LPSPI2 => self.lpspi[1].write(off, value),
             base::GPT1 => self.gpt[0].write(off, value),
             base::GPT2 => self.gpt[1].write(off, value),
             base::WDOG1 => self.wdog1.write(off, value),
@@ -370,6 +382,12 @@ impl Peripherals {
         }
         if self.lpi2c[1].irq_pending() {
             m.set(irq::LPI2C2);
+        }
+        if self.lpspi[0].irq_pending() {
+            m.set(irq::LPSPI1);
+        }
+        if self.lpspi[1].irq_pending() {
+            m.set(irq::LPSPI2);
         }
         // GPIO1..2 combined lines (0..15 / 16..31). GPIO3+ combined lines
         // land in the ROADMAP as their pin banks come online.
