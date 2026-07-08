@@ -216,6 +216,32 @@ fn flexpwm_duty_observable_through_the_bus() {
 }
 
 #[test]
+fn usdhc_reads_an_sd_block_through_the_bus() {
+    use rt1060_rs::peripherals::usdhc::{BLOCK, SdCard};
+    const USDHC1: u32 = 0x402C_0000;
+    let mut soc = Rt1060::new();
+    soc.quiet();
+    // Card block 3 holds an incrementing byte pattern.
+    let mut img = vec![0u8; 4 * BLOCK];
+    for (i, b) in img.iter_mut().enumerate().skip(3 * BLOCK) {
+        *b = (i - 3 * BLOCK) as u8;
+    }
+    soc.insert_sd_card(1, SdCard::new(img));
+
+    // PRES_STATE (0x24) reports an inserted card.
+    assert_ne!(soc.bus.read32(USDHC1 + 0x24) & (1 << 16), 0, "card present");
+    // BLK_ATT: 1 block × 512; CMD17 READ_SINGLE_BLOCK, block 3.
+    soc.bus.write32(USDHC1 + 0x04, (1 << 16) | BLOCK as u32);
+    soc.bus.write32(USDHC1 + 0x08, 3); // CMD_ARG = block 3
+    soc.bus.write32(USDHC1 + 0x0C, 17 << 24); // CMD_XFR_TYP
+    // INT_STATUS.CC (bit 0) + BRR (bit 5) set.
+    assert_ne!(soc.bus.read32(USDHC1 + 0x30) & 0x21, 0);
+    // First word of block 3 = bytes 0,1,2,3 LE = 0x03020100.
+    assert_eq!(soc.bus.read32(USDHC1 + 0x20), 0x0302_0100);
+    assert_eq!(soc.bus.read32(USDHC1 + 0x20), 0x0706_0504);
+}
+
+#[test]
 fn rgb_led_red_turns_on_active_low() {
     let mut soc = Rt1060::new();
     soc.quiet();

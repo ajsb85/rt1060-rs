@@ -36,6 +36,7 @@ pub mod pwm;
 pub mod qtmr;
 pub mod semc;
 pub mod src;
+pub mod usdhc;
 pub mod wdog;
 
 use crate::cortex_m::IrqMask;
@@ -99,6 +100,8 @@ pub mod base {
     pub const SRC: u32 = 0x400F_8000;
     pub const CCM: u32 = 0x400F_C000;
     pub const SEMC: u32 = 0x402F_0000;
+    pub const USDHC1: u32 = 0x402C_0000;
+    pub const USDHC2: u32 = 0x402C_4000;
     pub const PWM1: u32 = 0x403D_C000;
     pub const PWM2: u32 = 0x403E_0000;
     pub const PWM3: u32 = 0x403E_4000;
@@ -158,6 +161,8 @@ pub mod irq {
     pub const TMR2: u32 = 134;
     pub const TMR3: u32 = 135;
     pub const TMR4: u32 = 136;
+    pub const USDHC1: u32 = 110;
+    pub const USDHC2: u32 = 111;
 }
 
 // ---------------------------------------------------------------------------
@@ -189,6 +194,8 @@ pub struct Peripherals {
     pub pwm: [pwm::Pwm; 4],
     /// QTMR1..4 (index 0 = TMR1).
     pub qtmr: [qtmr::Qtmr; 4],
+    /// USDHC1/2 (index 0 = USDHC1).
+    pub usdhc: [usdhc::Usdhc; 2],
     pub gpt: [gpt::Gpt; 2],
     pub wdog1: wdog::Wdog,
     pub wdog2: wdog::Wdog,
@@ -244,6 +251,7 @@ impl Peripherals {
             adc: [adc::Adc::new(1), adc::Adc::new(2)],
             pwm: std::array::from_fn(|i| pwm::Pwm::new(i as u8 + 1)),
             qtmr: std::array::from_fn(|i| qtmr::Qtmr::new(i as u8 + 1)),
+            usdhc: [usdhc::Usdhc::new(1), usdhc::Usdhc::new(2)],
             gpt: [gpt::Gpt::new(), gpt::Gpt::new()],
             wdog1: wdog::Wdog::new(wdog::Kind::Wdog),
             wdog2: wdog::Wdog::new(wdog::Kind::Wdog),
@@ -297,6 +305,8 @@ impl Peripherals {
             base::OCOTP => self.ocotp.read(off),
             base::PIT => self.pit.read(off),
             base::SEMC => self.semc.read(off),
+            base::USDHC1 => self.usdhc[0].read(off),
+            base::USDHC2 => self.usdhc[1].read(off),
             base::LPI2C1 => self.lpi2c[0].read(off),
             base::LPI2C2 => self.lpi2c[1].read(off),
             base::LPSPI1 => self.lpspi[0].read(off),
@@ -343,6 +353,8 @@ impl Peripherals {
             base::OCOTP => self.ocotp.write(off, value),
             base::PIT => self.pit.write(off, value),
             base::SEMC => self.semc.write(off, value),
+            base::USDHC1 => self.usdhc[0].write(off, value),
+            base::USDHC2 => self.usdhc[1].write(off, value),
             base::LPI2C1 => self.lpi2c[0].write(off, value),
             base::LPI2C2 => self.lpi2c[1].write(off, value),
             base::LPSPI1 => self.lpspi[0].write(off, value),
@@ -560,6 +572,12 @@ impl Peripherals {
             if t.irq_pending() {
                 m.set(irq::TMR1 + i as u32); // TMR1..4 = IRQ 133..136
             }
+        }
+        if self.usdhc[0].irq_pending() {
+            m.set(irq::USDHC1);
+        }
+        if self.usdhc[1].irq_pending() {
+            m.set(irq::USDHC2);
         }
         if self.lpi2c[0].irq_pending() {
             m.set(irq::LPI2C1);

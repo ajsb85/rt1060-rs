@@ -173,6 +173,19 @@ impl Rt1060 {
         self.bus.periph.clock_hz().1
     }
 
+    /// Insert an SD card into a USDHC port (1 or 2) — the SwiftIO Micro reads
+    /// its user image and assets from the card on USDHC1.
+    pub fn insert_sd_card(&mut self, port: u8, card: crate::peripherals::usdhc::SdCard) {
+        if let Some(u) = self
+            .bus
+            .periph
+            .usdhc
+            .get_mut(port.saturating_sub(1) as usize)
+        {
+            u.insert(card);
+        }
+    }
+
     /// Configured duty cycle (0.0..=1.0) of a FlexPWM output, or `None` when
     /// the output is disabled / unconfigured. `instance` is 1..4, `submodule`
     /// 0..3.
