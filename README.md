@@ -47,10 +47,7 @@ Milestone tracking lives in [`ROADMAP.md`](ROADMAP.md). Snapshot:
 | **Boots real NXP SDK blinky (ITCM / FlexSPI-XIP / SDRAM) — LED toggles** | ✅ |
 | **Boots a real embedded-Swift blink — drives the SwiftIO RGB LED** | ✅ |
 | **Boots the REAL MadMachine SwiftIO Blink** (`mm build`: SwiftIO + Zephyr + embedded Swift) through the full RTOS stack — **zero unimplemented instructions**, LED toggles | ✅ |
-| **Runs the REAL MadMachine Potentiometer example** — reads `AnalogIn(A0)` via the ADC conversion-complete **interrupt** and prints the driven voltage | ✅ |
-| **Runs the REAL MadMachine BreathingLED + Humiture examples** — FlexPWM duty ramp, and an SHT3x **I2C sensor** read over the interrupt-driven LPI2C3 path | ✅ |
-| **Runs the REAL MadMachine LCD example** — the ST7789 driver fills a 240×240 display red over **SPI** (LPSPI3) | ✅ |
-| **Runs the REAL MadMachine SerialLEDSwitch example** — reads **UART** RX (LPUART2) and switches an LED from injected serial input | ✅ |
+| **Runs 9 REAL MadMachine SwiftIO Playground examples** — Potentiometer (ADC+IRQ), BreathingLED (PWM), Humiture (SHT3x I2C), Accelerometer (LIS3DH I2C), RTC (PCF8563 I2C), LCD (ST7789 SPI), Speaker (SAI/I2S), SerialLEDSwitch (UART RX) — each drives a real peripheral end-to-end with an emulated device/input | ✅ |
 | **GDB remote stub** + `RT1060_TRACE` logging + criterion benches | ✅ |
 | SwiftIO 44-pin map (id→GPIO, from HAL static analysis) via `swiftio_pin()` | ✅ |
 | USB CDC enumeration, SEMC real command decode, ENET | ⬜ ROADMAP |
