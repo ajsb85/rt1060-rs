@@ -144,8 +144,12 @@ use). Frequency math and the full pin table remain.
       payload | crc32`) over LPUART1: SYNC + a RAM download lands its bytes in
       SDRAM, verified (`tests/mm_download.rs`, `examples/mm_download.rs`). No USB
       stack needed — the bootloader accepts the download over UART
-- [ ] FLASH/PARTITION/FS download tags (program a real `micro.img` to NOR via
-      the bootloader, then two-stage boot it)
+- [x] **FLASH/PARTITION download + two-stage boot** — `mm download` a real
+      `micro.img` to the NOR `user` partition (`PART_BEGIN/DATA/END/SETBOOT`),
+      then read it back from NOR, parse the header, load the payload to SDRAM
+      and boot it into the Zephyr app (`tests/mm_download.rs`)
+- [ ] FS download tags (`FS_*`); run the SerialLoader's own two-stage boot path
+      (rather than the harness reading NOR → SDRAM)
 - [ ] HIL parity: compare against a physical SwiftIO Micro over USB-serial
 
 ## M9 — Tooling ⏳
