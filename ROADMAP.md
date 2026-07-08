@@ -19,12 +19,15 @@ Legend: ✅ done · ⏳ partial / stored-readback · ⬜ not started.
 Ported from the mg24-rs Cortex-M33 core (shared Thumb-2 mainline + DSP ISA).
 
 - [x] Thumb-16 + Thumb-2 wide decode/execute, IT blocks, DSP/SIMD, sat
+- [x] **DSP parallel add/subtract + SEL + APSR.GE** (SADD8/UADD8/USUB8/
+      UADD16/ASX/SAX and Q/H variants — the SDK memcpy uses uadd8+sel)
 - [x] Exceptions: SVC/PendSV/SysTick/NVIC, stack framing, EXC_RETURN, nesting
 - [x] **NVIC widened to 158 external IRQs** (`IrqMask`, 5×32-bit words)
 - [x] SysTick, MPU (PMSAv7, 16 regions, stored-readback), CPUID = M7 r1p2
-- [x] 98 instruction/exception unit tests green
-- [ ] FPv5-**D16** double-precision FPU (SP path ported; DP ops + `vldm.64`
-      / `vstm.64` widening still needed — SwiftIO is soft-float, so deferred)
+- [x] instruction/exception unit tests green (incl. DSP + DP-FP)
+- [x] FPv5-**D16** double-precision FPU (D0..D15 alias the S pairs; VADD/VSUB/
+      VMUL/VDIV/VABS/VNEG/VSQRT/VCMP.F64 + cross-precision/integer VCVTs —
+      hit by `CLOCK_GetPllFreq`'s f64 (a*b)/c even in soft-float firmware)
 - [ ] L1 I/D cache maintenance ops (CCR IC/DC, `mcr` cache ops) as no-ops
 - [ ] Decode cache for the flash/SDRAM instruction stream (rp2350-rs precedent)
 
@@ -108,19 +111,25 @@ use). Frequency math and the full pin table remain.
 - [ ] USB device transfer engine (queue heads / dTDs) + CDC-ACM enumeration
       (the `mm download` / console bridge)
 - [ ] USDHC ADMA/DMA data path (currently PIO)
-- [ ] FlexSPI controller register model + XIP program/erase
+- [x] **FlexSPI IP command engine** — LUT/IPCR/IPCMD driving program / read /
+      sector-erase + JEDEC ID against the backed NOR (Zephyr littlefs/NOR)
 - [ ] ENET, CAN (FlexCAN), I²S (SAI)
 
-## M8 — Boot real firmware ⏳
+## M8 — Boot real firmware ✅
 
 - [x] **Boot a real, unmodified NXP SDK Cortex-M7 image** (RT1050 EVK LED
       blinky, ITCM `0x2000`): runs clock/pin-mux/GPIO init with **zero
       unmapped-register / unimplemented-instruction hits** and **blinks the
       LED** (`GPIO1_IO09` toggles) — `tests/boot_fixture.rs`, `examples/probe.rs`
-- [ ] Boot the MadMachine bootloader ("eboot") from FlexSPI flash
-- [ ] Two-stage boot: verify `micro.img`, copy to SDRAM, jump to `__start`
-- [ ] Bring Zephyr up to `PRE_KERNEL → APPLICATION`; assert console banner
-- [ ] Run the SwiftIO `01LED` / `Blink` example; assert RGB LED toggling
+- [x] **Boot the REAL MadMachine SwiftIO Blink** (`mm build`, SDK 2.2.0 — full
+      SwiftIO + Zephyr + embedded Swift, from SDRAM) end-to-end with **zero
+      unimplemented instructions**
+- [x] Bring Zephyr up through kernel + device init to the application; assert
+      the LittleFS console log over LPUART1
+- [x] Run the SwiftIO `Blink` example; **assert the RGB LED toggles** (RED/BLUE
+      at the `sleep(ms:500)` interval) by SwiftIO logical id
+- [ ] Boot the MadMachine bootloader ("eboot") from FlexSPI flash + two-stage
+      `micro.img` verify/copy (bring-up loads the user image straight to SDRAM)
 - [ ] HIL parity: compare against a physical SwiftIO Micro over USB-serial
 
 ## M9 — Tooling ⏳

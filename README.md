@@ -28,7 +28,8 @@ Milestone tracking lives in [`ROADMAP.md`](ROADMAP.md). Snapshot:
 
 | Area | State |
 |---|---|
-| Cortex-M7 core (Thumb-2 + DSP, exceptions, NVIC 158 IRQs, SysTick, MPU) | ✅ ported, 98 tests |
+| Cortex-M7 core (Thumb-2 + DSP parallel-add/SEL, exceptions, NVIC 158 IRQs, SysTick, MPU) | ✅ ported |
+| FPv5-D16 FPU (single- **and** double-precision, GE flags) | ✅ |
 | Memory map + AIPS bus (ITCM/DTCM/OCRAM/FlexSPI/SDRAM) | ✅ |
 | Loader (ELF32, raw bin, MadMachine `micro.img`) | ✅ |
 | LPUART (console), GPIO, CCM, GPT, SRC, WDOG | ✅ |
@@ -40,15 +41,16 @@ Milestone tracking lives in [`ROADMAP.md`](ROADMAP.md). Snapshot:
 | FlexPWM (`pwm_duty()`) + QTMR (PERCLK counting) | ✅ |
 | USDHC + attachable **SD card** (init + block read/write) | ✅ |
 | USB OTG register block (init runs; full CDC enumeration ⬜) | ✅ |
-| FlexCAN (message buffers + loopback), SAI/I²S, FlexSPI controller | ✅ |
+| FlexCAN (message buffers + loopback), SAI/I²S | ✅ |
+| FlexSPI IP command engine (program/read/erase + JEDEC ID vs backed NOR) | ✅ |
 | eDMA scatter-gather + channel linking; PLL2 PFD clock roots | ✅ |
 | **Boots real NXP SDK blinky (ITCM / FlexSPI-XIP / SDRAM) — LED toggles** | ✅ |
 | **Boots a real embedded-Swift blink — drives the SwiftIO RGB LED** | ✅ |
+| **Boots the REAL MadMachine SwiftIO Blink** (`mm build`: SwiftIO + Zephyr + embedded Swift) through the full RTOS stack — **zero unimplemented instructions**, LED toggles | ✅ |
 | **GDB remote stub** + `RT1060_TRACE` logging + criterion benches | ✅ |
 | SwiftIO 44-pin map (id→GPIO, from HAL static analysis) via `swiftio_pin()` | ✅ |
-| USB CDC enumeration, SEMC/FlexSPI IP command decode, ENET | ⬜ ROADMAP |
-| Double-precision FPU (FPv5-D16) | ⬜ ROADMAP (SwiftIO builds soft-float) |
-| WASM front-end; full MadMachine Zephyr stack (needs the Swift SDK bundle) | ⬜ ROADMAP |
+| USB CDC enumeration, SEMC real command decode, ENET | ⬜ ROADMAP |
+| MadMachine two-stage bootloader (eboot); WASM front-end; HIL parity | ⬜ ROADMAP |
 
 ## Quick start
 
