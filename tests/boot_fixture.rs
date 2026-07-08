@@ -94,6 +94,66 @@ fn embedded_swift_blinks_the_swiftio_rgb_led() {
     assert_eq!(soc.swiftio_pin(45), Some(false), "GREEN untouched");
 }
 
+/// The **real, unmodified MadMachine SwiftIO Blink** — built with the
+/// MadMachine SDK 2.2.0 (`mm build`) as the full SwiftIO + Zephyr + embedded-
+/// Swift image, running from SDRAM. This fast check boots it through the whole
+/// Zephyr kernel + device init (clocks, ADC calibration, GPT, LPUART, LPI2C,
+/// LPSPI, FlexSPI/littlefs) and asserts it reached Zephyr's console logging —
+/// proof the real firmware runs. Provenance: `tests/fixtures/README.md`.
+#[test]
+fn madmachine_swiftio_blink_boots_zephyr() {
+    const BLINK: &[u8] = include_bytes!("fixtures/madmachine_swiftio_blink.elf");
+    let image = loader::load_elf(BLINK).expect("parse ELF");
+    let mut soc = Rt1060::boot(&image);
+    soc.quiet();
+    assert_eq!(image.base, 0x8000_0000, "MadMachine image runs from SDRAM");
+
+    for _ in 0..12_000_000 {
+        soc.step();
+        if let Some(BreakCause::Unimplemented(hw)) = soc.core.break_cause {
+            panic!("unimplemented instruction {hw:#06x} in MadMachine boot");
+        }
+    }
+    // Zephyr's console (LPUART1) logged the littlefs bring-up — the kernel and
+    // device init are running.
+    let console = soc.console_string();
+    assert!(
+        console.contains("LittleFS"),
+        "expected Zephyr console output, got: {console:?}"
+    );
+}
+
+/// Deep check: run the real MadMachine Blink long enough for the `sleep(ms:500)`
+/// loop to toggle the RGB LED — RED (id 44, GPIO1 pin 9) and BLUE (id 46, pin
+/// 11). Ignored by default (~1 billion instructions through the full Zephyr
+/// stack); run with `cargo test --release -- --ignored`.
+#[test]
+#[ignore = "runs ~1B instructions through Zephyr; cargo test --release -- --ignored"]
+fn madmachine_swiftio_blink_toggles_the_led() {
+    const BLINK: &[u8] = include_bytes!("fixtures/madmachine_swiftio_blink.elf");
+    let image = loader::load_elf(BLINK).expect("parse ELF");
+    let mut soc = Rt1060::boot(&image);
+    soc.quiet();
+
+    let mut transitions = 0;
+    let mut last = soc.swiftio_pin(44); // RED
+    for _ in 0..1_100_000_000u64 {
+        soc.step();
+        let red = soc.swiftio_pin(44);
+        if red != last {
+            transitions += 1;
+            last = red;
+            if transitions >= 3 {
+                break;
+            }
+        }
+    }
+    assert!(
+        transitions >= 3,
+        "the MadMachine Blink should toggle the RGB LED (saw {transitions})"
+    );
+}
+
 /// Deep check: run long enough for the delay loop to elapse and observe the
 /// LED actually toggle. Ignored by default (hundreds of millions of
 /// instructions); run with `cargo test --release -- --ignored`.

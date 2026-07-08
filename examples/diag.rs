@@ -25,11 +25,18 @@ fn main() {
     let mut last_ipsr = 0u16;
     let mut min_pc = u32::MAX;
     let mut max_pc = 0u32;
+    let mut unimpl: std::collections::BTreeMap<u32, (u32, u64)> = std::collections::BTreeMap::new();
     let chunk = 1_000_000u64;
     let mut done = 0u64;
     while done < max {
         for _ in 0..chunk {
+            let pc = soc.core.regs[15];
             soc.step();
+            if let Some(rt1060_rs::cortex_m::BreakCause::Unimplemented(hw)) = soc.core.break_cause {
+                let e = unimpl.entry(hw).or_insert((pc, 0));
+                e.1 += 1;
+                soc.core.break_cause = None; // clear and continue
+            }
             if soc.core.ipsr != 0 && last_ipsr == 0 {
                 exceptions += 1;
             }
@@ -39,6 +46,12 @@ fn main() {
             max_pc = max_pc.max(pc);
         }
         done += chunk;
+    }
+    if !unimpl.is_empty() {
+        println!("  UNIMPLEMENTED instructions hit (encoding → first PC, count):");
+        for (hw, (pc, n)) in &unimpl {
+            println!("    {hw:#06x} at {pc:#010x}  ×{n}");
+        }
     }
     let c = &soc.core;
     println!("after {done} steps:");

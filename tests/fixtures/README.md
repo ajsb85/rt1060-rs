@@ -72,3 +72,18 @@ arm-none-eabi-gcc -mcpu=cortex-m7 -mthumb -nostdlib -nostartfiles \
 
 `tests/boot_fixture.rs::embedded_swift_blinks_the_swiftio_rgb_led` boots it and
 watches the RED/BLUE pins toggle via `Rt1060::swiftio_pin(id)`.
+
+### `madmachine_swiftio_blink.elf`
+
+The **real, unmodified MadMachine SwiftIO Blink** — the canonical `Blink`
+example (`red.toggle(); blue.toggle(); sleep(ms: 500)`) built with the
+**MadMachine SDK 2.2.0** via `mm build` for the SwiftIO Micro: the full
+embedded-Swift `SwiftIO` + `MadBoards` package linked against the prebuilt
+Zephyr RTOS + HAL, running from SDRAM `0x8000_0000`.
+
+It boots through the entire Zephyr kernel and device init in the emulator —
+clocks, ADC (auto-calibration), GPT, LPUART console, LPI2C, LPSPI, and the
+FlexSPI/littlefs storage layer — and runs the Blink loop, toggling the RGB LED
+(RED = GPIO1 pin 9, BLUE = pin 11) at the 500 ms interval. `RT1060_TRACE` /
+`examples/probe.rs` show the live Zephyr console log. See
+`tests/boot_fixture.rs`.

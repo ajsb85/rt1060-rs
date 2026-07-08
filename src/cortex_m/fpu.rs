@@ -1,12 +1,15 @@
-//! FPv5-SP-D16 floating point (the Cortex-M33 FPU on the EFR32MG24).
+//! FPv5-D16 floating point — the RT1062 has the full double-precision unit.
 //!
-//! Single-precision arithmetic only — MG24 toolchains build with
-//! `fpv5-sp-d16`, so doubles stay in software. D registers exist
-//! solely as S-register pairs for VPUSH/VPOP/VLDM/VSTM and the two-word
-//! VMOV. FP context is never stacked on exception entry (handlers using
-//! FP would corrupt thread FP state; SDK handlers don't use FP).
+//! Single-precision is the common path; the double-precision D16 arithmetic
+//! (VADD/VSUB/VMUL/VDIV/VABS/VNEG/VSQRT/VCMP.F64 and the cross-precision /
+//! integer VCVTs) is also modelled because even soft-float SDK firmware hits
+//! it — e.g. `CLOCK_GetPllFreq` computes its PLL ratio as an f64 `(a*b)/c`.
+//! The 16 double registers `D0..D15` alias the `S0..S31` pairs
+//! (`Dn = S2n:S2n+1`), so they share the `fpregs` file. FP context is never
+//! stacked on exception entry (handlers using FP would corrupt thread FP
+//! state; SDK handlers don't use FP).
 //!
-//! Encodings cross-checked against GNU `as -march=armv8-m.main+fp`.
+//! Encodings cross-checked against GNU `as -mcpu=cortex-m7 -mfpu=fpv5-d16`.
 
 use super::{BreakCause, Bus, CortexM7, PC};
 
@@ -19,6 +22,29 @@ impl CortexM7 {
     #[inline(always)]
     fn set_s(&mut self, r: u32, v: f32) {
         self.fpregs[(r & 31) as usize] = v.to_bits();
+    }
+
+    /// A double register `Dn` aliases the S-register pair `S2n:S2n+1`
+    /// (little-endian: the low word is the even S register).
+    #[inline(always)]
+    fn d(&self, r: u32) -> f64 {
+        let lo = self.fpregs[((r * 2) & 31) as usize] as u64;
+        let hi = self.fpregs[((r * 2 + 1) & 31) as usize] as u64;
+        f64::from_bits(lo | hi << 32)
+    }
+
+    #[inline(always)]
+    fn set_d(&mut self, r: u32, v: f64) {
+        let bits = v.to_bits();
+        self.fpregs[((r * 2) & 31) as usize] = bits as u32;
+        self.fpregs[((r * 2 + 1) & 31) as usize] = (bits >> 32) as u32;
+    }
+
+    /// Double-register number for the Dd/Dn/Dm fields: the extra bit is the
+    /// high bit (`hi:v4`), unlike single regs where it is the low bit.
+    #[inline(always)]
+    fn dreg(hi: u32, v4: u32) -> u32 {
+        (hi & 1) << 4 | (v4 & 0xf)
     }
 
     /// Sd for single ops: Vd:D (register number in bits, D is the low bit).
@@ -217,8 +243,102 @@ impl CortexM7 {
 
         // --- Data processing (CDP space, bit4 = 0) ----------------------
         if dp {
-            // No f64 arithmetic on fpv5-sp-d16.
-            self.break_cause = Some(BreakCause::Unimplemented(h1 | h2 << 16));
+            // FPv5-D16 double-precision. The RT1062 FPU has the D16 double
+            // path (soft-float SDK firmware still hits it in e.g.
+            // CLOCK_GetPllFreq's f64 (a*b)/c). D registers alias the S pairs.
+            let dd = Self::dreg((h1 >> 6) & 1, (h2 >> 12) & 0xf);
+            let dn = Self::dreg((h2 >> 7) & 1, h1 & 0xf);
+            let dm = Self::dreg((h2 >> 5) & 1, h2 & 0xf);
+            let neg = h2 & 0x40 != 0;
+            match (h1 >> 4) & 0xb {
+                0x0 => {
+                    // VMLA/VMLS.F64
+                    let prod = self.d(dn) * self.d(dm);
+                    let v = if neg {
+                        self.d(dd) - prod
+                    } else {
+                        self.d(dd) + prod
+                    };
+                    self.set_d(dd, v);
+                }
+                0x2 => {
+                    let v = self.d(dn) * self.d(dm);
+                    self.set_d(dd, if neg { -v } else { v }); // VMUL / VNMUL
+                }
+                0x3 => {
+                    let v = if neg {
+                        self.d(dn) - self.d(dm) // VSUB
+                    } else {
+                        self.d(dn) + self.d(dm) // VADD
+                    };
+                    self.set_d(dd, v);
+                }
+                0x8 => self.set_d(dd, self.d(dn) / self.d(dm)), // VDIV
+                0xb => {
+                    // Extension group: VMOV/VABS/VNEG/VSQRT/VCMP and the
+                    // cross-precision / integer VCVTs (the int/single operand
+                    // lives in a *single* register, hence sd/sm here).
+                    match h1 & 0xf {
+                        0x0 => {
+                            let v = self.d(dm);
+                            self.set_d(dd, if h2 & 0x80 != 0 { v.abs() } else { v }); // VMOV/VABS
+                        }
+                        0x1 => {
+                            let v = self.d(dm);
+                            self.set_d(dd, if h2 & 0x80 != 0 { v.sqrt() } else { -v }); // VSQRT/VNEG
+                        }
+                        0x4 | 0x5 => {
+                            // VCMP{,E}.F64 Dd, Dm / #0.0
+                            let a = self.d(dd);
+                            let b = if h1 & 1 != 0 { 0.0 } else { self.d(dm) };
+                            let (nf, zf, cf, vf) = if a.is_nan() || b.is_nan() {
+                                (false, false, true, true)
+                            } else if a == b {
+                                (false, true, true, false)
+                            } else if a < b {
+                                (true, false, false, false)
+                            } else {
+                                (false, false, true, false)
+                            };
+                            self.fpscr = self.fpscr & 0x0fff_ffff
+                                | (nf as u32) << 31
+                                | (zf as u32) << 30
+                                | (cf as u32) << 29
+                                | (vf as u32) << 28;
+                        }
+                        0x7 => {
+                            // VCVT.F32.F64: double -> single (Sd single dest).
+                            let sd = Self::sd(h1, h2);
+                            self.set_s(sd, self.d(dm) as f32);
+                        }
+                        0x8 => {
+                            // VCVT.F64.{U32,S32}: single-int Sm -> double Dd.
+                            let sm = Self::sm(h2);
+                            let bits = self.fpregs[(sm & 31) as usize];
+                            let v = if h2 & 0x80 != 0 {
+                                bits as i32 as f64
+                            } else {
+                                bits as f64
+                            };
+                            self.set_d(dd, v);
+                        }
+                        0xc | 0xd => {
+                            // VCVT.{U32,S32}.F64: double Dm -> single-int Sd,
+                            // round toward zero (Rust `as` saturates like FPU).
+                            let sd = Self::sd(h1, h2);
+                            let v = self.d(dm);
+                            let bits = if h1 & 1 != 0 {
+                                v as i32 as u32
+                            } else {
+                                v as u32
+                            };
+                            self.fpregs[(sd & 31) as usize] = bits;
+                        }
+                        _ => self.break_cause = Some(BreakCause::Unimplemented(h1 | h2 << 16)),
+                    }
+                }
+                _ => self.break_cause = Some(BreakCause::Unimplemented(h1 | h2 << 16)),
+            }
             return;
         }
         let d = Self::sd(h1, h2);

@@ -104,6 +104,9 @@ pub struct CortexM7 {
     pub v: bool,
     /// APSR.Q sticky saturation flag (bit 27; set by SSAT/USAT).
     pub q: bool,
+    /// APSR.GE[3:0] greater-than-or-equal flags (bits 19:16; set by the DSP
+    /// parallel add/sub instructions, consumed by SEL).
+    pub ge: u8,
     /// Exception number currently active (IPSR); 0 in thread mode.
     pub ipsr: u16,
     /// EPSR.IT/ICI state, ITSTATE encoding (0 = not in an IT block).
@@ -309,6 +312,7 @@ impl CortexM7 {
             c: false,
             v: false,
             q: false,
+            ge: 0,
             ipsr: 0,
             it_state: 0,
             primask: false,
@@ -369,6 +373,7 @@ impl CortexM7 {
             | (self.c as u32) << 29
             | (self.v as u32) << 28
             | (self.q as u32) << 27
+            | (self.ge as u32) << 16
     }
 
     pub fn set_apsr(&mut self, value: u32) {
@@ -377,6 +382,7 @@ impl CortexM7 {
         self.c = value & (1 << 29) != 0;
         self.v = value & (1 << 28) != 0;
         self.q = value & (1 << 27) != 0;
+        self.ge = ((value >> 16) & 0xf) as u8;
     }
 
     pub fn xpsr(&self) -> u32 {

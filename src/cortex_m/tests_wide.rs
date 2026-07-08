@@ -876,3 +876,104 @@ fn vcvt_fixed_unsigned_and_16bit_container() {
     cpu.step(&mut bus);
     assert_eq!(f32::from_bits(cpu.fpregs[12]), 1.5);
 }
+
+// --- ARMv7E-M DSP parallel add/subtract + SEL (GNU as, cortex-m7) ------------
+
+#[test]
+fn uadd8_sets_ge_and_sel_selects_bytes() {
+    // fa81 f042  uadd8 r0, r1, r2 ; faa4 f385  sel r3, r4, r5
+    let (mut cpu, mut bus) = setup_w(&[(0xfa81, 0xf042), (0xfaa4, 0xf385)]);
+    cpu.regs[1] = 0x01ff_01ff; // bytes 3..0: 01 FF 01 FF
+    cpu.regs[2] = 0x0101_ffff; //           01 01 FF FF
+    cpu.step(&mut bus);
+    // byte0 FF+FF=1FE, byte1 01+FF=100, byte2 FF+01=100 (all carry, GE=1);
+    // byte3 01+01=02 (no carry, GE=0).
+    assert_eq!(cpu.regs[0], 0x0200_00fe);
+    assert_eq!(cpu.ge, 0b0111);
+
+    // SEL picks Rn byte where GE=1, else Rm byte.
+    cpu.regs[4] = 0xaaaa_aaaa;
+    cpu.regs[5] = 0x5555_5555;
+    cpu.step(&mut bus);
+    assert_eq!(cpu.regs[3], 0x55aa_aaaa, "GE 0111 -> bytes 0-2 from Rn");
+}
+
+#[test]
+fn usub8_ge_is_no_borrow() {
+    // fac1 f042  usub8 r0, r1, r2
+    let (mut cpu, mut bus) = setup_w(&[(0xfac1, 0xf042)]);
+    cpu.regs[1] = 0x1020_0580; // bytes 3..0: 10 20 05 80
+    cpu.regs[2] = 0x0520_1001; //           05 20 10 01
+    cpu.step(&mut bus);
+    // byte0 80-01=7F (GE), byte1 05-10 borrow (no GE), byte2 20-20=00 (GE),
+    // byte3 10-05=0B (GE).
+    assert_eq!(cpu.regs[0], 0x0b00_f57f);
+    assert_eq!(cpu.ge, 0b1101);
+}
+
+#[test]
+fn uadd16_two_lanes_and_ge_pairs() {
+    // fa91 f042  uadd16 r0, r1, r2
+    let (mut cpu, mut bus) = setup_w(&[(0xfa91, 0xf042)]);
+    cpu.regs[1] = 0xffff_0001; // hi 0xffff, lo 0x0001
+    cpu.regs[2] = 0x0002_0002; // hi 0x0002, lo 0x0002
+    cpu.step(&mut bus);
+    // lo 0x0001+0x0002=0x0003 (no carry, GE[1:0]=0);
+    // hi 0xffff+0x0002=0x10001 -> 0x0001 (carry, GE[3:2]=1).
+    assert_eq!(cpu.regs[0], 0x0001_0003);
+    assert_eq!(cpu.ge, 0b1100);
+}
+
+#[test]
+fn apsr_ge_round_trips_through_xpsr() {
+    let mut cpu = CortexM7::new();
+    cpu.ge = 0b1010;
+    assert_eq!((cpu.xpsr() >> 16) & 0xf, 0b1010);
+    cpu.set_apsr(0x0005_0000); // GE = 0b0101
+    assert_eq!(cpu.ge, 0b0101);
+}
+
+// --- FPv5-D16 double-precision (CLOCK_GetPllFreq's f64 (a*b)/c path) ---------
+
+#[test]
+fn double_precision_mul_div_and_int_convert() {
+    // The exact sequence the RT1062 SDK compiles for a PLL frequency ratio.
+    let (mut cpu, mut bus) = setup_w(&[
+        (0xeeb8, 0x7b67), // vcvt.f64.u32 d7, s15   ; D7 = (f64) S15
+        (0xee27, 0x7b06), // vmul.f64 d7, d7, d6    ; D7 = D7 * D6
+        (0xee87, 0x6b05), // vdiv.f64 d6, d7, d5    ; D6 = D7 / D5
+        (0xeefc, 0x7bc6), // vcvt.u32.f64 s15, d6   ; S15 = (u32) D6
+    ]);
+    cpu.cpacr = 0x00f0_0000; // CP10/11 full access
+    cpu.fpregs[15] = 6; // S15 = 6 (u32)
+    let set_d = |cpu: &mut CortexM7, d: usize, v: f64| {
+        let b = v.to_bits();
+        cpu.fpregs[d * 2] = b as u32;
+        cpu.fpregs[d * 2 + 1] = (b >> 32) as u32;
+    };
+    set_d(&mut cpu, 6, 7.0); // D6 = 7.0
+    set_d(&mut cpu, 5, 3.0); // D5 = 3.0
+    for _ in 0..4 {
+        cpu.step(&mut bus);
+    }
+    // (6 * 7) / 3 = 14.
+    assert_eq!(cpu.fpregs[15], 14);
+    assert!(cpu.break_cause.is_none());
+}
+
+#[test]
+fn double_precision_add_aliases_s_pairs() {
+    // ee31 0b02  vadd.f64 d0, d1, d2
+    let (mut cpu, mut bus) = setup_w(&[(0xee31, 0x0b02)]);
+    cpu.cpacr = 0x00f0_0000;
+    let set_d = |cpu: &mut CortexM7, d: usize, v: f64| {
+        let b = v.to_bits();
+        cpu.fpregs[d * 2] = b as u32;
+        cpu.fpregs[d * 2 + 1] = (b >> 32) as u32;
+    };
+    set_d(&mut cpu, 1, 1.5); // D1
+    set_d(&mut cpu, 2, 2.75); // D2
+    cpu.step(&mut bus);
+    let d0 = f64::from_bits(cpu.fpregs[0] as u64 | (cpu.fpregs[1] as u64) << 32);
+    assert_eq!(d0, 4.25);
+}

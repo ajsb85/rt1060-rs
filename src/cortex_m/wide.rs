@@ -88,6 +88,42 @@ fn thumb_expand_imm_c(imm12: u32, carry_in: bool) -> (u32, bool) {
     }
 }
 
+/// One lane of a DSP parallel add/subtract. Returns the `width`-bit result
+/// (masked, low-aligned) and the lane's GE flag (meaningful only for the plain
+/// modifier). `unsigned` selects the sign domain; `sub` the operation; `modif`
+/// 0 = plain, 1 = Q (saturate to the type range), 2 = H (arithmetic halve).
+fn lane_add_sub(a: u32, b: u32, width: u32, unsigned: bool, sub: bool, modif: u32) -> (u32, bool) {
+    let mask = ((1u64 << width) - 1) as u32;
+    let (raw, ge): (i64, bool) = if unsigned {
+        if sub {
+            // GE = 1 when there is no borrow (a >= b).
+            (a as i64 - b as i64, a >= b)
+        } else {
+            let s = a as i64 + b as i64;
+            (s, s > mask as i64) // GE = carry out of the lane
+        }
+    } else {
+        let sa = ((a << (32 - width)) as i32 >> (32 - width)) as i64;
+        let sb = ((b << (32 - width)) as i32 >> (32 - width)) as i64;
+        let r = if sub { sa - sb } else { sa + sb };
+        (r, r >= 0) // GE = result is non-negative
+    };
+    let out = match modif {
+        1 => {
+            // Q: saturate to the signed or unsigned range of the lane.
+            if unsigned {
+                raw.clamp(0, mask as i64) as u32
+            } else {
+                let hi = (mask >> 1) as i64;
+                raw.clamp(-hi - 1, hi) as u32
+            }
+        }
+        2 => (raw >> 1) as u32, // H: arithmetic halve
+        _ => raw as u32,        // plain
+    };
+    (out & mask, ge)
+}
+
 impl CortexM7 {
     /// Register read where R15 yields the architectural PC (pc4).
     #[inline(always)]
@@ -117,6 +153,55 @@ impl CortexM7 {
                 }
             }
             _ => self.wide_class_c(bus, h1, h2, pc4),
+        }
+    }
+
+    /// ARMv7E-M DSP parallel add/subtract: operate on the two 16-bit or four
+    /// 8-bit lanes of Rn/Rm independently. `op1` (h1[6:4]) picks the lane
+    /// layout and per-lane add/sub; `op2` (h2[7:4]) picks signedness (bit 2)
+    /// and the modifier (bits 1:0 = plain / Q saturating / H halving). The
+    /// plain forms set APSR.GE per lane; Q and H leave GE untouched.
+    fn parallel_add_sub(&mut self, op1: u32, op2: u32, rd: usize, rn: usize, rm: usize) {
+        let n = self.regs[rn];
+        let m = self.regs[rm];
+        let unsigned = op2 & 0x4 != 0;
+        let modif = op2 & 0x3; // 0 = plain (GE), 1 = Q (saturate), 2 = H (halve)
+        let byte = matches!(op1, 0b000 | 0b100); // ADD8 / SUB8
+        let mut result = 0u32;
+        let mut ge = 0u8;
+        if byte {
+            let sub = op1 == 0b100;
+            for i in 0..4 {
+                let a = (n >> (i * 8)) & 0xff;
+                let b = (m >> (i * 8)) & 0xff;
+                let (lane, g) = lane_add_sub(a, b, 8, unsigned, sub, modif);
+                result |= lane << (i * 8);
+                if g {
+                    ge |= 1 << i;
+                }
+            }
+        } else {
+            for i in 0..2 {
+                let a = (n >> (i * 16)) & 0xffff;
+                // ASX/SAX cross the Rm halfwords; ADD16/SUB16 do not.
+                let cross = matches!(op1, 0b010 | 0b110);
+                let b = (m >> (if cross { 1 - i } else { i } * 16)) & 0xffff;
+                let sub = match op1 {
+                    0b001 => false,  // ADD16
+                    0b101 => true,   // SUB16
+                    0b010 => i == 0, // ASX: low subtracts, high adds
+                    _ => i == 1,     // SAX (0b110): low adds, high subtracts
+                };
+                let (lane, g) = lane_add_sub(a, b, 16, unsigned, sub, modif);
+                result |= lane << (i * 16);
+                if g {
+                    ge |= if i == 0 { 0x3 } else { 0xc };
+                }
+            }
+        }
+        self.regs[rd] = result;
+        if modif == 0 {
+            self.ge = ge;
         }
     }
 
@@ -707,11 +792,32 @@ impl CortexM7 {
             return;
         }
         if h1 & 0xff80 == 0xfa80 && h2 & 0xf000 == 0xf000 {
-            // Miscellaneous: CLZ, RBIT, REV.W family.
             let rn = (h1 & 0xf) as usize;
             let rd = ((h2 >> 8) & 0xf) as usize;
+            let rm = (h2 & 0xf) as usize;
+            let op1 = (h1 >> 4) & 0x7; // h1[6:4]
+            let op2 = (h2 >> 4) & 0xf; // h2[7:4]
+            if op2 & 0x8 == 0 {
+                // Parallel add/subtract (signed/unsigned, byte/halfword),
+                // ARMv7E-M DSP. op1 selects add8/add16/asx/sub8/sub16/sax;
+                // op2[2] = unsigned, op2[1:0] = plain(GE) / Q(sat) / H(halve).
+                self.parallel_add_sub(op1, op2, rd, rn, rm);
+                return;
+            }
+            // Miscellaneous: SEL, then CLZ / RBIT / REV.W family.
             let x = self.regs[rn];
-            let result = match ((h1 >> 4) & 0x7, (h2 >> 4) & 0xf) {
+            let result = match (op1, op2) {
+                (0b010, 0b1000) => {
+                    // SEL: pick each byte from Rn if the matching GE flag is
+                    // set, else from Rm (Rn == self.regs[rn] == x).
+                    let y = self.regs[rm];
+                    let mut r = 0u32;
+                    for i in 0..4 {
+                        let lane = 0xffu32 << (i * 8);
+                        r |= if self.ge & (1 << i) != 0 { x } else { y } & lane;
+                    }
+                    r
+                }
                 (0b011, 0b1000) => x.leading_zeros(), // CLZ
                 (0b001, 0b1010) => x.reverse_bits(),  // RBIT
                 (0b001, 0b1000) => x.swap_bytes(),    // REV.W
