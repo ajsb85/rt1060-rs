@@ -108,12 +108,14 @@ use). Frequency math and the full pin table remain.
 - [ ] Run the SwiftIO `01LED` / `Blink` example; assert RGB LED toggling
 - [ ] HIL parity: compare against a physical SwiftIO Micro over USB-serial
 
-## M9 — Tooling ⬜
+## M9 — Tooling ⏳
 
-- [ ] GDB remote-serial stub (rp2350-rs precedent): breakpoints, mem, regs
+- [x] GDB remote-serial stub: breakpoints, mem, regs, step/continue,
+      Ctrl-C; `examples/gdbserver.rs` + `gdb-multiarch`
+- [x] Trace/log gating by env var (`RT1060_TRACE` = writes, `=all` = reads)
 - [ ] WASM front-end (`wasm-bindgen`) for an in-browser SwiftIO playground
 - [ ] `criterion` benchmarks; keep the hot loop allocation-free
-- [ ] Trace/log gating by env var (`RT1060_TRACE`)
+- [ ] Hardware breakpoints (FPB) + watchpoints in the GDB stub
 
 ## Known simplifications (revisit as firmware demands)
 

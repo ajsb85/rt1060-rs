@@ -36,11 +36,13 @@ Milestone tracking lives in [`ROADMAP.md`](ROADMAP.md). Snapshot:
 | RGB LED observable (GPIO1 9/10/11, active-low) via `led_rgb()` | ✅ |
 | Clock-tree frequency model (core/IPG/PERCLK/UART) → `core_hz()` | ✅ |
 | PIT, GPT (clock-domain accurate) | ✅ |
-| eDMA (32-ch TCD engine through the bus), LPI2C, LPSPI, ADC | ✅ + device hooks |
-| DMAMUX hw-request routing, PWM/QTMR, USDHC (SD), USB, SEMC decode | ⬜ ROADMAP |
+| eDMA (32-ch TCD through the bus) + DMAMUX hw requests, LPI2C, LPSPI, ADC | ✅ + device hooks |
+| FlexPWM (observable duty via `pwm_duty()`) | ✅ |
+| **GDB remote stub** (`gdb-multiarch`) + `RT1060_TRACE` logging | ✅ |
+| QTMR, USDHC (SD), USB CDC, SEMC command decode | ⬜ ROADMAP |
 | IOMUXC full 44-pin table, PLL PFD fractional math | ⏳ |
 | Double-precision FPU (FPv5-D16) | ⬜ ROADMAP (SwiftIO builds soft-float) |
-| GDB stub, WASM front-end, boot a real SwiftIO Micro image | ⬜ ROADMAP |
+| WASM front-end, boot a real SwiftIO Micro image | ⬜ ROADMAP |
 
 ## Quick start
 
@@ -59,6 +61,18 @@ print!("{}", soc.console_string());
 
 Raw binaries and ELFs load the same way via `loader::load_bin(addr, &data)`
 and `loader::load_elf(&bytes)`.
+
+### Debug with GDB
+
+```bash
+cargo run --example gdbserver -- firmware.elf 3333
+gdb-multiarch -ex "target remote :3333" firmware.elf
+```
+
+Register/memory access, breakpoints, and step/continue all work. Set
+`RT1060_TRACE=1` to log peripheral writes (`=all` for reads too) while a
+firmware image brings the chip up — the fastest way to see which registers a
+driver pokes.
 
 ## Build & test
 

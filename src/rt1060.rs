@@ -91,10 +91,13 @@ impl Rt1060 {
         soc
     }
 
-    /// Silence unmapped/unknown-peripheral logging (tests, benchmarks).
+    /// Silence unmapped/unknown-peripheral logging and any `RT1060_TRACE`
+    /// output (tests, benchmarks).
     pub fn quiet(&mut self) {
         self.bus.log_unmapped = false;
         self.bus.periph.log_unknown = false;
+        self.bus.trace_writes = false;
+        self.bus.trace_reads = false;
     }
 
     /// Execute one instruction (plus any exception it triggers) and advance

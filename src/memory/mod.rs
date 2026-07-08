@@ -57,6 +57,10 @@ pub struct SystemBus {
     pub periph: Peripherals,
     /// Log unmapped accesses to stderr, once per 256-byte bucket.
     pub log_unmapped: bool,
+    /// Trace peripheral writes to stderr (env `RT1060_TRACE` set).
+    pub trace_writes: bool,
+    /// Trace peripheral reads too (env `RT1060_TRACE` = `all`/contains `read`).
+    pub trace_reads: bool,
     warned: std::collections::BTreeSet<u32>,
 }
 
@@ -68,6 +72,9 @@ impl Default for SystemBus {
 
 impl SystemBus {
     pub fn new() -> Self {
+        // `RT1060_TRACE` (any value) traces peripheral writes; `=all` (or a
+        // value containing `read`) traces reads too.
+        let trace = std::env::var("RT1060_TRACE").ok();
         Self {
             itcm: vec![0; map::ITCM_SIZE].into_boxed_slice(),
             dtcm: vec![0; map::DTCM_SIZE].into_boxed_slice(),
@@ -76,6 +83,11 @@ impl SystemBus {
             sdram: vec![0; map::SDRAM_SIZE].into_boxed_slice(),
             periph: Peripherals::new(),
             log_unmapped: true,
+            trace_writes: trace.is_some(),
+            trace_reads: trace
+                .as_deref()
+                .map(|v| v == "all" || v.contains("read"))
+                .unwrap_or(false),
             warned: std::collections::BTreeSet::new(),
         }
     }
@@ -145,7 +157,11 @@ impl SystemBus {
 
     fn periph_read(&mut self, addr: u32) -> u32 {
         if Self::is_periph(addr) {
-            self.periph.read(addr)
+            let v = self.periph.read(addr);
+            if self.trace_reads {
+                self.trace('R', addr, v);
+            }
+            v
         } else {
             self.unmapped("read", addr);
             0
@@ -154,11 +170,23 @@ impl SystemBus {
 
     fn periph_write(&mut self, addr: u32, value: u32) {
         if Self::is_periph(addr) {
+            if self.trace_writes {
+                self.trace('W', addr, value);
+            }
             self.periph.write(addr, value);
             self.dma_trigger(addr);
         } else {
             self.unmapped("write", addr);
         }
+    }
+
+    /// One peripheral-access trace line, tagged by 16 KiB base.
+    #[cold]
+    fn trace(&self, kind: char, addr: u32, value: u32) {
+        eprintln!(
+            "[rt1060-rs trace] {kind} {addr:#010x} = {value:#010x} (base {:#010x})",
+            addr & !0x3FFF
+        );
     }
 
     /// A write into the eDMA window may have set `TCD.CSR.START` / `SSRT` —
@@ -237,6 +265,9 @@ impl SystemBus {
             return;
         }
         if Self::is_periph(addr) {
+            if self.trace_writes {
+                self.trace('w', addr, u32::from(value));
+            }
             self.periph.write16(addr, value);
             self.dma_trigger(addr);
         } else {
@@ -262,6 +293,9 @@ impl SystemBus {
             return;
         }
         if Self::is_periph(addr) {
+            if self.trace_writes {
+                self.trace('b', addr, u32::from(value));
+            }
             self.periph.write8(addr, value);
             self.dma_trigger(addr);
         } else {
@@ -388,6 +422,19 @@ mod tests {
         assert!(bus.irq_lines().is_zero());
         bus.periph.lpuart[0].rx_push(b'z');
         assert!(bus.irq_lines().test(20), "LPUART1 = IRQ 20");
+    }
+
+    #[test]
+    fn tracing_does_not_alter_behavior() {
+        // With write tracing on, register access must still work identically
+        // (the trace is a pure side channel to stderr).
+        let mut bus = quiet_bus();
+        bus.trace_writes = true;
+        bus.trace_reads = true;
+        bus.write32(base::GPIO1 + 0x04, 0xFFFF_FFFF); // GDIR
+        bus.write32(base::GPIO1 + 0x84, 1 << 3); // DR_SET pin 3
+        assert!(bus.periph.gpio[0].output(3));
+        assert_eq!(bus.read32(base::GPIO1), 1 << 3);
     }
 
     #[test]
