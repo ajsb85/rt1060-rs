@@ -100,6 +100,10 @@ use). Frequency math and the full pin table remain.
 - [x] DMAMUX request routing + hardware-request triggering (source→channel)
 - [x] PWM: FlexPWM (duty observability) + **QTMR** (PERCLK counting, IRQ)
 - [ ] SAI/I²S, FlexCAN
+- [ ] **Interrupt-driven LPI2C completion** — the Zephyr `i2c_mcux_lpi2c`
+      driver is non-blocking (`k_sem_take` woken by the IRQ-28 state machine),
+      so the SwiftIO I2C examples (e.g. Humiture/SHT3x) block before a transfer;
+      the model completes transfers synchronously and drives no completion IRQ
 - [ ] eDMA scatter-gather (ESG), channel linking, error reporting
 
 ## M7 — Storage, USB, connectivity ⏳
