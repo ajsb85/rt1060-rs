@@ -700,7 +700,16 @@ impl CortexM7 {
                 // MRS Rd, spec_reg
                 let rd = ((h2 >> 8) & 0xf) as usize;
                 self.regs[rd] = match h2 & 0xff {
-                    0..=3 => self.apsr() | if h2 & 0x1 != 0 { self.ipsr as u32 } else { 0 },
+                    // PSR group (SYSm 0..=7): APSR present unless bit 2 is set
+                    // (i[E]PSR), IPSR present when bit 0 is set (I*PSR). EPSR
+                    // bits always read as zero through MRS. `mrs Rd, IPSR`
+                    // (SYSm 5) is what Zephyr's `_isr_wrapper` uses to index
+                    // the software ISR table, so it must yield the exception
+                    // number, not 0.
+                    0..=7 => {
+                        let apsr = if h2 & 0x4 == 0 { self.apsr() } else { 0 };
+                        apsr | if h2 & 0x1 != 0 { self.ipsr as u32 } else { 0 }
+                    }
                     8 => self.msp(),
                     9 => self.psp(),
                     16 => self.primask as u32,

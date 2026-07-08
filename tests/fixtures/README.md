@@ -87,3 +87,14 @@ FlexSPI/littlefs storage layer — and runs the Blink loop, toggling the RGB LED
 (RED = GPIO1 pin 9, BLUE = pin 11) at the 500 ms interval. `RT1060_TRACE` /
 `examples/probe.rs` show the live Zephyr console log. See
 `tests/boot_fixture.rs`.
+
+### `madmachine_swiftio_pot.elf`
+
+The **real MadMachine Potentiometer example** (SwiftIO Playground `04Potentiometer`)
+built with the MadMachine SDK 2.2.0: `AnalogIn(Id.A0).readVoltage()` printed once
+a second. Unlike Blink (GPIO + console only) it drives the **ADC** and the full
+**external-interrupt** path — the ADC conversion-complete IRQ routes through
+Zephyr's `_isr_wrapper`, which reads `IPSR` to index the software ISR table.
+Finding this exposed a core bug (`mrs Rd, IPSR` returned 0, sending every
+external interrupt to a garbage handler). Driving the ADC inputs to a known
+value makes the firmware print the matching voltage. See `tests/boot_fixture.rs`.

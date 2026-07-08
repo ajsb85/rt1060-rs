@@ -1396,7 +1396,7 @@ impl CortexM7 {
                     self.wfi_hint = true;
                 }
             }
-            _ => unreachable!(),
+            _ => self.break_cause = Some(BreakCause::Unimplemented(op)),
         }
     }
 

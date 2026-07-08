@@ -690,6 +690,31 @@ fn mrs_msr_msp_psp_control() {
 }
 
 #[test]
+fn mrs_reads_ipsr_exception_number() {
+    // `mrs Rd, IPSR` (SYSm 5) must yield the active exception number, not 0 —
+    // Zephyr's `_isr_wrapper` indexes the software ISR table with it, so 0
+    // sends every external interrupt through a garbage handler.
+    let (mut cpu, mut bus) = setup(&[]);
+    let (h1, h2) = mrs(0, 5); // MRS r0, IPSR
+    bus.write16(RAM, h1);
+    bus.write16(RAM + 2, h2);
+    cpu.ipsr = 84; // in exception 84 (external IRQ 68)
+    cpu.n = true; // APSR flags must NOT leak into IPSR
+    cpu.step(&mut bus);
+    assert_eq!(cpu.regs[0], 84);
+
+    // `mrs Rd, xPSR` (SYSm 3) combines APSR + IPSR.
+    let (mut cpu, mut bus) = setup(&[]);
+    let (h1, h2) = mrs(1, 3);
+    bus.write16(RAM, h1);
+    bus.write16(RAM + 2, h2);
+    cpu.ipsr = 20;
+    cpu.n = true; // APSR.N (bit 31)
+    cpu.step(&mut bus);
+    assert_eq!(cpu.regs[1], (1 << 31) | 20);
+}
+
+#[test]
 fn cps_and_primask_via_mrs() {
     let (mut cpu, mut bus) = setup(&[cpsid_i(), cpsie_i()]);
     cpu.step(&mut bus);

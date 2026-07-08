@@ -161,6 +161,39 @@ fn madmachine_swiftio_blink_toggles_the_led() {
     );
 }
 
+/// The **real MadMachine Potentiometer example** (`AnalogIn(A0).readVoltage()`
+/// printed once a second), built with the MadMachine SDK. It exercises the
+/// full external-interrupt path — the ADC's conversion-complete IRQ routes
+/// through Zephyr's `_isr_wrapper`, which reads `IPSR` (the bug that broke
+/// every external IRQ) — plus the ADC model and Swift's `print`. Driving every
+/// ADC input to 3/4 scale makes the firmware print ~2.47 V (of the 3.3 V ref).
+/// Ignored by default (tens of millions of instructions through Zephyr).
+#[test]
+#[ignore = "runs ~30M instructions through Zephyr; cargo test --release -- --ignored"]
+fn madmachine_potentiometer_reads_the_adc() {
+    const POT: &[u8] = include_bytes!("fixtures/madmachine_swiftio_pot.elf");
+    let image = loader::load_elf(POT).expect("parse ELF");
+    let mut soc = Rt1060::boot(&image);
+    soc.quiet();
+    // 0xC00 = 3072 of 4095 → 3072/4095 * 3.3 V ≈ 2.47 V.
+    for adc in soc.bus.periph.adc.iter_mut() {
+        for ch in 0..16 {
+            adc.set_channel(ch, 3072);
+        }
+    }
+    for _ in 0..30_000_000u64 {
+        soc.step();
+        if let Some(BreakCause::Unimplemented(hw)) = soc.core.break_cause {
+            panic!("unimplemented instruction {hw:#06x} in Potentiometer boot");
+        }
+    }
+    let console = soc.console_string();
+    assert!(
+        console.contains("2.47"),
+        "the firmware should read and print the driven ADC voltage (~2.47 V): {console:?}"
+    );
+}
+
 /// Deep check: attach an SD card and confirm the real MadMachine Zephyr SD
 /// driver runs its full init — controller reset, the CMD0/8/ACMD41/CMD2/CMD3/
 /// CMD9/CMD7 identification, ACMD51 SCR, and the CMD6 timing / driver-strength
