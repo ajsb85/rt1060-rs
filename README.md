@@ -45,10 +45,10 @@ Milestone tracking lives in [`ROADMAP.md`](ROADMAP.md). Snapshot:
 | **Boots real NXP SDK blinky (ITCM / FlexSPI-XIP / SDRAM) — LED toggles** | ✅ |
 | **Boots a real embedded-Swift blink — drives the SwiftIO RGB LED** | ✅ |
 | **GDB remote stub** + `RT1060_TRACE` logging + criterion benches | ✅ |
+| SwiftIO 44-pin map (id→GPIO, from HAL static analysis) via `swiftio_pin()` | ✅ |
 | USB CDC enumeration, SEMC/FlexSPI IP command decode, ENET | ⬜ ROADMAP |
-| IOMUXC full 44-pin table, FPv5-D16 double-precision FPU | ⏳ |
 | Double-precision FPU (FPv5-D16) | ⬜ ROADMAP (SwiftIO builds soft-float) |
-| WASM front-end, boot a real SwiftIO Micro image | ⬜ ROADMAP |
+| WASM front-end; full MadMachine Zephyr stack (needs the Swift SDK bundle) | ⬜ ROADMAP |
 
 ## Quick start
 
