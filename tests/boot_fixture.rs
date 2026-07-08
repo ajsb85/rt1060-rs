@@ -161,6 +161,51 @@ fn madmachine_swiftio_blink_toggles_the_led() {
     );
 }
 
+/// The **real MadMachine LCD example** (`08LCD`): the MadDrivers `ST7789`
+/// driver over `SPI(Id.SPI0)` filling a 240×240 display with solid colours.
+/// SwiftIO `Id.SPI0` is LPSPI3; the driver is interrupt-driven
+/// (`LPSPI_MasterTransferNonBlocking` + `spi_context_wait`, IRQ-34 ISR). This
+/// records the MOSI bytes from an attached display: `clearScreen(red)`
+/// (`0xF800` → high byte `0xF8`) writes 57 600 red pixels, so seeing tens of
+/// thousands of `0xF8` bytes proves the ST7789 renders over SPI. Ignored by
+/// default (~200M instructions, including the ST7789 ~120 ms reset delay).
+#[test]
+#[ignore = "runs ~200M instructions through Zephyr; cargo test --release -- --ignored"]
+fn madmachine_lcd_fills_the_screen_over_spi() {
+    use std::sync::{Arc, Mutex};
+    struct Recorder {
+        hist: Arc<Mutex<[u64; 256]>>,
+    }
+    impl rt1060_rs::peripherals::lpspi::SpiDevice for Recorder {
+        fn transfer(&mut self, mosi: u32) -> u32 {
+            self.hist.lock().unwrap()[(mosi & 0xff) as usize] += 1;
+            0
+        }
+    }
+
+    const LCD: &[u8] = include_bytes!("fixtures/madmachine_swiftio_lcd.elf");
+    let image = loader::load_elf(LCD).expect("parse ELF");
+    let mut soc = Rt1060::boot(&image);
+    soc.quiet();
+    let hist = Arc::new(Mutex::new([0u64; 256]));
+    // SwiftIO Id.SPI0 = LPSPI3 = index 2.
+    soc.bus.periph.lpspi[2].attach(Box::new(Recorder { hist: hist.clone() }));
+
+    let red = |h: &Arc<Mutex<[u64; 256]>>| h.lock().unwrap()[0xF8];
+    let mut steps = 0u64;
+    while steps < 300_000_000 && red(&hist) < 50_000 {
+        for _ in 0..2_000_000 {
+            soc.step();
+        }
+        steps += 2_000_000;
+    }
+    let seen = red(&hist);
+    assert!(
+        seen >= 50_000,
+        "the ST7789 driver should fill the screen red over SPI (saw {seen} red bytes)"
+    );
+}
+
 /// A minimal Sensirion **SHT3x** humidity/temperature sensor on I2C (address
 /// `0x44`). It answers any command by returning the fixed 6-byte measurement
 /// `[tempMSB, tempLSB, crc, humMSB, humLSB, crc]`; the MadDrivers `SHT3x` driver

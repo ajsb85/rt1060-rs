@@ -117,3 +117,13 @@ The Zephyr `i2c_mcux_lpi2c` driver is interrupt-driven
 state machine), so this fixture exercises the whole LPI2C interrupt path plus a
 real sensor driver. `tests/boot_fixture.rs` attaches an emulated SHT3x and
 asserts the decoded temperature is printed.
+
+### `madmachine_swiftio_lcd.elf`
+
+The **real MadMachine LCD example** (SwiftIO Playground `08LCD`) built with the
+MadMachine SDK: the MadDrivers `ST7789` driver over `SPI(Id.SPI0)` filling a
+240×240 display with solid colours. SwiftIO `Id.SPI0` is **LPSPI3**
+(`0x4039_C000`, IRQ 34); the driver is interrupt-driven
+(`LPSPI_MasterTransferNonBlocking` + `spi_context_wait`). `tests/boot_fixture.rs`
+attaches a recording display and asserts a full red screen (57 600 `0xF8`
+pixel bytes) is written over SPI.

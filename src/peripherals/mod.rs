@@ -129,6 +129,8 @@ pub mod base {
     pub const LPI2C4: u32 = 0x403F_C000;
     pub const LPSPI1: u32 = 0x4039_4000;
     pub const LPSPI2: u32 = 0x4039_8000;
+    pub const LPSPI3: u32 = 0x4039_C000;
+    pub const LPSPI4: u32 = 0x403A_0000;
     pub const LPUART1: u32 = 0x4018_4000;
     pub const LPUART2: u32 = 0x4018_8000;
     pub const LPUART3: u32 = 0x4018_C000;
@@ -165,6 +167,8 @@ pub mod irq {
     pub const LPI2C4: u32 = 31;
     pub const LPSPI1: u32 = 32;
     pub const LPSPI2: u32 = 33;
+    pub const LPSPI3: u32 = 34;
+    pub const LPSPI4: u32 = 35;
     pub const GPIO1_COMBINED_0_15: u32 = 80;
     pub const GPIO1_COMBINED_16_31: u32 = 81;
     pub const GPIO2_COMBINED_0_15: u32 = 82;
@@ -213,8 +217,8 @@ pub struct Peripherals {
     pub semc: semc::Semc,
     /// LPI2C1..4 (index 0 = LPI2C1). SwiftIO `Id.I2C0` is LPI2C3.
     pub lpi2c: [lpi2c::LpI2c; 4],
-    /// LPSPI1/2 (index 0 = LPSPI1).
-    pub lpspi: [lpspi::LpSpi; 2],
+    /// LPSPI1..4 (index 0 = LPSPI1). SwiftIO `Id.SPI0`/`SPI1` are LPSPI3/4.
+    pub lpspi: [lpspi::LpSpi; 4],
     /// ADC1/2 (index 0 = ADC1).
     pub adc: [adc::Adc; 2],
     /// FlexPWM1..4 (index 0 = PWM1).
@@ -287,7 +291,12 @@ impl Peripherals {
                 lpi2c::LpI2c::new(3),
                 lpi2c::LpI2c::new(4),
             ],
-            lpspi: [lpspi::LpSpi::new(1), lpspi::LpSpi::new(2)],
+            lpspi: [
+                lpspi::LpSpi::new(1),
+                lpspi::LpSpi::new(2),
+                lpspi::LpSpi::new(3),
+                lpspi::LpSpi::new(4),
+            ],
             adc: [adc::Adc::new(1), adc::Adc::new(2)],
             pwm: std::array::from_fn(|i| pwm::Pwm::new(i as u8 + 1)),
             qtmr: std::array::from_fn(|i| qtmr::Qtmr::new(i as u8 + 1)),
@@ -366,6 +375,8 @@ impl Peripherals {
             base::LPI2C4 => self.lpi2c[3].read(off),
             base::LPSPI1 => self.lpspi[0].read(off),
             base::LPSPI2 => self.lpspi[1].read(off),
+            base::LPSPI3 => self.lpspi[2].read(off),
+            base::LPSPI4 => self.lpspi[3].read(off),
             base::ADC1 => self.adc[0].read(off),
             base::ADC2 => self.adc[1].read(off),
             base::PWM1 => self.pwm[0].read32(off),
@@ -425,6 +436,8 @@ impl Peripherals {
             base::LPI2C4 => self.lpi2c[3].write(off, value),
             base::LPSPI1 => self.lpspi[0].write(off, value),
             base::LPSPI2 => self.lpspi[1].write(off, value),
+            base::LPSPI3 => self.lpspi[2].write(off, value),
+            base::LPSPI4 => self.lpspi[3].write(off, value),
             base::ADC1 => self.adc[0].write(off, value),
             base::ADC2 => self.adc[1].write(off, value),
             base::PWM1 => self.pwm[0].write32(off, value),
@@ -684,6 +697,12 @@ impl Peripherals {
         }
         if self.lpspi[1].irq_pending() {
             m.set(irq::LPSPI2);
+        }
+        if self.lpspi[2].irq_pending() {
+            m.set(irq::LPSPI3);
+        }
+        if self.lpspi[3].irq_pending() {
+            m.set(irq::LPSPI4);
         }
         if self.adc[0].irq_pending() {
             m.set(irq::ADC1);
