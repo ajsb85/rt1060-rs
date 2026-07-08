@@ -109,11 +109,12 @@ pub fn load_micro_img(bytes: &[u8]) -> Result<LoadedImage, String> {
         return Err("image shorter than its 4 KiB header".into());
     }
     let rd32 = |o: usize| u32::from_le_bytes(bytes[o..o + 4].try_into().unwrap());
-    // Header layout (image.py create_image): [0]=header CRC32, [4]=offset,
-    // [8]=size, [12]=load_address, [16]=type, …
+    // Header layout (image.py `create_image`), all little-endian:
+    // [0] header CRC32, [4] offset (u64), [12] size (u64), [20] load_address
+    // (u64), [28] type, [32] verify_type, [36] hash/CRC — then 0xFF pad to 4K.
     let offset = rd32(4) as usize;
-    let size = rd32(8) as usize;
-    let load_address = rd32(12);
+    let size = rd32(12) as usize;
+    let load_address = rd32(20);
     if offset == 0 || offset > bytes.len() {
         return Err("implausible payload offset in header".into());
     }
@@ -180,10 +181,12 @@ mod tests {
 
     #[test]
     fn micro_img_honours_header() {
+        // Real layout (image.py): [0] header CRC, [4] offset u64, [12] size u64,
+        // [20] load_address u64 — the fields the loader must read.
         let mut b = vec![0xFFu8; 0x1000 + 8];
-        b[4..8].copy_from_slice(&0x1000u32.to_le_bytes()); // offset
-        b[8..12].copy_from_slice(&8u32.to_le_bytes()); // size
-        b[12..16].copy_from_slice(&0x8000_0000u32.to_le_bytes()); // load_address
+        b[4..12].copy_from_slice(&0x1000u64.to_le_bytes()); // offset
+        b[12..20].copy_from_slice(&8u64.to_le_bytes()); // size
+        b[20..28].copy_from_slice(&0x8000_0000u64.to_le_bytes()); // load_address
         b[0x1000..0x1000 + 8].copy_from_slice(&[1, 2, 3, 4, 5, 6, 7, 8]);
         let img = load_micro_img(&b).expect("valid img");
         assert_eq!(img.segments[0].addr, 0x8000_0000);

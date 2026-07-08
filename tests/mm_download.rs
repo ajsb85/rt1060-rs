@@ -12,11 +12,17 @@
 use rt1060_rs::{Rt1060, loader};
 
 const BOOTLOADER: &[u8] = include_bytes!("fixtures/mm_serial_loader.bin");
+/// The real Blink `micro.img` (mm SDK: a 4 KiB header + the SDRAM payload).
+const MICRO_IMG: &[u8] = include_bytes!("fixtures/madmachine_swiftio_blink.img");
 const PREAMBLE: [u8; 8] = [0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x55, 0x5D];
 const SYNC_TAG: u32 = 0x02;
 const RAM_BEGIN_TAG: u32 = 0x0A;
 const RAM_DATA_TAG: u32 = 0x0B;
 const RAM_END_TAG: u32 = 0x0C;
+const PART_BEGIN_TAG: u32 = 0x38;
+const PART_DATA_TAG: u32 = 0x39;
+const PART_END_TAG: u32 = 0x3A;
+const PART_SETBOOT_TAG: u32 = 0x3B;
 
 /// CRC-32/ISO-HDLC (zlib `crc32`) over `tag | length | payload`.
 fn crc32(data: &[u8]) -> u32 {
@@ -107,5 +113,62 @@ fn mm_download_ram_lands_in_sdram() {
     assert_eq!(
         landed, data,
         "the RAM download should place its bytes verbatim in SDRAM"
+    );
+}
+
+/// The full production deploy: `mm download` a real `micro.img` to the **NOR
+/// flash** `user` partition (PART_BEGIN/DATA/END + SETBOOT), then **two-stage
+/// boot** it — read the image back from NOR, parse its header, load the payload
+/// to SDRAM, and run it, reaching the Zephyr application. This is the emulated
+/// equivalent of `mm download <micro.img>` followed by a reset.
+#[test]
+#[ignore = "downloads a 154 KiB image + two-stage boots (~200M steps); cargo test --release -- --ignored"]
+fn mm_download_flashes_micro_img_and_two_stage_boots() {
+    let mut soc = Rt1060::boot(&loader::load_bin(0x0, BOOTLOADER));
+    soc.quiet();
+    for _ in 0..40_000_000u64 {
+        soc.step();
+    }
+    for i in 0..2 {
+        soc.bus.periph.lpuart[i].take_output();
+    }
+
+    // Program the image to the "user" flash partition.
+    let mut name = b"user".to_vec();
+    name.resize(64, 0);
+    transact(&mut soc, SYNC_TAG, &[]);
+    let mut begin = name.clone();
+    begin.extend_from_slice(&(MICRO_IMG.len() as u32).to_be_bytes());
+    transact(&mut soc, PART_BEGIN_TAG, &begin);
+    for chunk in MICRO_IMG.chunks(65536) {
+        transact(&mut soc, PART_DATA_TAG, chunk);
+    }
+    transact(&mut soc, PART_END_TAG, &crc32(MICRO_IMG).to_be_bytes());
+    transact(&mut soc, PART_SETBOOT_TAG, &name);
+
+    // The bootloader wrote the image to the NOR `user` partition (0xA_0000).
+    let nor: Vec<u8> = (0..MICRO_IMG.len() as u32)
+        .map(|i| soc.bus.read8(0x6000_0000 + 0xA_0000 + i))
+        .collect();
+    assert_eq!(nor, MICRO_IMG, "the micro.img should land in NOR verbatim");
+
+    // First-stage boot: parse the header from NOR and run the SDRAM payload.
+    let staged = loader::load_micro_img(&nor).expect("parse micro.img from NOR");
+    assert_eq!(staged.base, 0x8000_0000, "payload loads to SDRAM");
+    let mut booted = Rt1060::boot(&staged);
+    booted.quiet();
+    let mut console = String::new();
+    for _ in 0..40 {
+        for _ in 0..1_000_000u64 {
+            booted.step();
+        }
+        console.push_str(&booted.console_string());
+        if console.contains("LittleFS") {
+            break;
+        }
+    }
+    assert!(
+        console.contains("LittleFS"),
+        "the flashed image should two-stage boot into the Zephyr application"
     );
 }

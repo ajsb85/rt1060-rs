@@ -162,3 +162,11 @@ logs "Recovery base Zephyr! mm_feather" on LPUART2) and accepts the framed
 serial download protocol on LPUART1. `tests/mm_download.rs` and
 `examples/mm_download.rs` drive that protocol (SYNC + RAM download) and verify
 the bytes land in SDRAM — the emulated equivalent of `mm download <image>`.
+
+### `madmachine_swiftio_blink.img`
+
+The Blink `micro.img` (mm SDK `mm build` output for `DemoBlink`) — a 4 KiB
+header (`image.py`: CRC, offset, size, load address `0x8000_0000`, SHA-256) plus
+the raw SDRAM payload. `tests/mm_download.rs` programs it to the NOR `user`
+partition over the `mm download` partition protocol, then two-stage boots it
+(read from NOR → parse header → load to SDRAM → run) into the Zephyr app.
