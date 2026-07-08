@@ -42,9 +42,15 @@ pub struct CcmAnalog {
 
 impl CcmAnalog {
     pub fn new() -> Self {
-        CcmAnalog {
-            regs: Box::new([0; 4096]),
-        }
+        let mut regs = Box::new([0u32; 4096]);
+        // PFD reset FRAC defaults so the clock tree computes nominal PFD
+        // outputs before firmware reprograms them. Each byte: [5:0] = FRAC.
+        // PFD_528 (0x100): FRAC0=27 → 528*18/27 = 352 MHz (PLL2_PFD0),
+        //                  FRAC2=24 → 528*18/24 = 396 MHz (PLL2_PFD2).
+        regs[(0x100 >> 2) as usize] = 27 | (16 << 8) | (24 << 16) | (16 << 24);
+        // PFD_480 (0x0F0): PLL3 PFDs (nominal ITU defaults).
+        regs[(0x0F0 >> 2) as usize] = 12 | (16 << 8) | (17 << 16) | (19 << 24);
+        CcmAnalog { regs }
     }
 
     #[inline]

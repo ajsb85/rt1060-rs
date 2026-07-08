@@ -63,6 +63,16 @@ impl Clocks {
         let periph_clk_sel = (cbcdr >> 25) & 1;
         let pre_periph = (cbcmr >> 18) & 3;
 
+        // PLL2 (SYS) PFD outputs = PLL_SYS × 18 / FRAC (CCM_ANALOG_PFD_528,
+        // 0x100; PFD0_FRAC [5:0], PFD2_FRAC [21:16]).
+        let pfd528 = analog.reg(0x100);
+        let pfd = |frac: u32| -> u64 {
+            let f = u64::from(frac & 0x3F);
+            if f == 0 { 0 } else { PLL_SYS * 18 / f }
+        };
+        let pll2_pfd0 = pfd(pfd528);
+        let pll2_pfd2 = pfd(pfd528 >> 16);
+
         // periph_clk = the pre-AHB source (fsl_clock.c CLOCK_GetPeriphClkFreq).
         let periph = if periph_clk_sel == 1 {
             // periph_clk2 path — its own mux defaults to the 24 MHz OSC.
@@ -70,8 +80,8 @@ impl Clocks {
         } else {
             match pre_periph {
                 0 => PLL_SYS,                               // PLL2
-                1 => 396_000_000,                           // PLL2_PFD2 (nominal)
-                2 => 352_000_000,                           // PLL2_PFD0 (nominal)
+                1 => pll2_pfd2,                             // PLL2_PFD2
+                2 => pll2_pfd0,                             // PLL2_PFD0
                 3 if div_select != 0 => pll_arm / arm_podf, // PLL1 / ARM_PODF
                 _ => 0,
             }
@@ -137,6 +147,21 @@ mod tests {
         assert_eq!(c.core, 600_000_000);
         assert_eq!(c.ipg, 150_000_000);
         assert_eq!(c.perclk, 24_000_000);
+    }
+
+    #[test]
+    fn pll2_pfd_derived_core_clock() {
+        // PRE_PERIPH = 2 selects PLL2_PFD0. Default FRAC0 = 27 → 528*18/27 =
+        // 352 MHz; reprogram FRAC0 = 18 → 528*18/18 = 528 MHz.
+        let mut ccm = Ccm::new();
+        let analog = CcmAnalog::new();
+        ccm.write(0x18, 2 << 18); // CBCMR.PRE_PERIPH_CLK_SEL = PLL2_PFD0
+        assert_eq!(Clocks::compute(&ccm, &analog).core, 352_000_000);
+
+        let mut analog = CcmAnalog::new();
+        // PFD_528 FRAC0 = 18 (keep the other lanes' defaults).
+        analog.write(0x100, 18 | (16 << 8) | (24 << 16) | (16 << 24));
+        assert_eq!(Clocks::compute(&ccm, &analog).core, 528_000_000);
     }
 
     #[test]
