@@ -155,6 +155,39 @@ impl Rt1060 {
         soc
     }
 
+    /// Cold-boot like the i.MX RT Boot ROM + MadMachine first-stage loader
+    /// (`eboot`): read the `micro.img` written to the FlexSPI NOR at
+    /// `partition_offset` (e.g. the `user` partition `mm download` targets),
+    /// honour its header, stage the payload into SDRAM at the header's load
+    /// address, and reset into it — what a physical board does after
+    /// `mm download` + reset, staging the image itself rather than in a harness.
+    /// Returns the SDRAM load address on success.
+    pub fn cold_boot_from_flash(&mut self, partition_offset: u32) -> Result<u32, String> {
+        let base = 0x6000_0000 + partition_offset;
+        // The 4 KiB header carries the payload offset (`[4]`) and size (`[12]`).
+        let offset = u32::from_le_bytes([
+            self.bus.read8(base + 4),
+            self.bus.read8(base + 5),
+            self.bus.read8(base + 6),
+            self.bus.read8(base + 7),
+        ]);
+        let size = u32::from_le_bytes([
+            self.bus.read8(base + 12),
+            self.bus.read8(base + 13),
+            self.bus.read8(base + 14),
+            self.bus.read8(base + 15),
+        ]);
+        let total = offset + size;
+        if !(0x1000..=16 * 1024 * 1024).contains(&total) {
+            return Err("no plausible micro.img at the boot partition".into());
+        }
+        let img: Vec<u8> = (0..total).map(|i| self.bus.read8(base + i)).collect();
+        let staged = crate::loader::load_micro_img(&img)?;
+        let load_address = staged.base;
+        self.load_image(&staged);
+        Ok(load_address)
+    }
+
     /// Silence unmapped/unknown-peripheral logging and any `RT1060_TRACE`
     /// output (tests, benchmarks).
     pub fn quiet(&mut self) {

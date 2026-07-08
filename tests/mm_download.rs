@@ -152,17 +152,19 @@ fn mm_download_flashes_micro_img_and_two_stage_boots() {
         .collect();
     assert_eq!(nor, MICRO_IMG, "the micro.img should land in NOR verbatim");
 
-    // First-stage boot: parse the header from NOR and run the SDRAM payload.
-    let staged = loader::load_micro_img(&nor).expect("parse micro.img from NOR");
-    assert_eq!(staged.base, 0x8000_0000, "payload loads to SDRAM");
-    let mut booted = Rt1060::boot(&staged);
-    booted.quiet();
+    // Two-stage boot in the SAME SoC — model the Boot ROM / first-stage loader
+    // reading the image out of NOR and staging it into SDRAM (not the harness).
+    let load_addr = soc
+        .cold_boot_from_flash(0xA_0000)
+        .expect("cold-boot the flashed micro.img");
+    assert_eq!(load_addr, 0x8000_0000, "payload staged to SDRAM");
+
     let mut console = String::new();
     for _ in 0..40 {
         for _ in 0..1_000_000u64 {
-            booted.step();
+            soc.step();
         }
-        console.push_str(&booted.console_string());
+        console.push_str(&soc.console_string());
         if console.contains("LittleFS") {
             break;
         }
