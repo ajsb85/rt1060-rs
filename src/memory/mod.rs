@@ -172,12 +172,31 @@ impl SystemBus {
         }
     }
 
-    /// One eDMA service pass (currently software-started channels only; the
-    /// per-channel hardware-request slice is empty until DMAMUX request
-    /// routing lands — ROADMAP).
+    /// One eDMA service pass for software-started channels (empty request
+    /// slice). Called at DMA-write strobe time.
     pub fn edma_service(&mut self) {
         let mut engine = std::mem::take(&mut self.periph.edma);
         engine.service(self, &[]);
+        self.periph.edma = engine;
+    }
+
+    /// One eDMA service pass driven by hardware requests: for each channel,
+    /// DMAMUX `CHCFG[ch]` (ENBL + source) selects a peripheral request line
+    /// whose level (with `ERQ[ch]`) triggers a minor loop. Cheap-gated on any
+    /// channel having its request enabled; called once per SoC step.
+    pub fn edma_service_hw(&mut self) {
+        if !self.periph.edma_hw_enabled() {
+            return;
+        }
+        let mut req = [false; 32];
+        for (ch, r) in req.iter_mut().enumerate() {
+            let chcfg = self.periph.dmamux_chcfg(ch);
+            if chcfg & 0x8000_0000 != 0 {
+                *r = self.periph.dma_request_level(chcfg & 0x7F);
+            }
+        }
+        let mut engine = std::mem::take(&mut self.periph.edma);
+        engine.service(self, &req);
         self.periph.edma = engine;
     }
 

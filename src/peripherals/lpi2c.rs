@@ -61,6 +61,7 @@ pub struct LpI2c {
     pub index: u8,
     mcr: u32,
     mier: u32,
+    mder: u32,
     /// Sticky status bits the driver clears via W1C (SDF/NDF/EPF/…).
     msr_sticky: u32,
     rx: VecDeque<u8>,
@@ -75,6 +76,7 @@ impl LpI2c {
             index,
             mcr: 0,
             mier: 0,
+            mder: 0,
             msr_sticky: 0,
             rx: VecDeque::new(),
             devices: Vec::new(),
@@ -135,6 +137,7 @@ impl LpI2c {
             }
             0x14 => self.msr_sticky &= !(value & (MSR_EPF | MSR_SDF | MSR_NDF)),
             0x18 => self.mier = value,
+            0x1C => self.mder = value, // MDER: DMA enable
             0x60 => self.command((value >> 8) & 0x7, value as u8),
             _ => {}
         }
@@ -196,6 +199,11 @@ impl LpI2c {
 
     pub fn irq_pending(&self) -> bool {
         self.msr() & self.mier != 0
+    }
+
+    /// DMA request (rx-driven): `MDER.RDDE` set and a received byte waiting.
+    pub fn dma_request(&self) -> bool {
+        self.mder & 0x2 != 0 && !self.rx.is_empty()
     }
 }
 

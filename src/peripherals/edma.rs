@@ -277,6 +277,12 @@ impl Edma {
         self.wr16(base + T_CSR, csr);
     }
 
+    /// Whether any channel has its hardware request enabled (`ERQ`). The bus
+    /// uses this to skip the per-step hardware-request service when idle.
+    pub fn hw_enabled(&self) -> bool {
+        self.erq != 0
+    }
+
     /// Any channel's interrupt request maps to IRQ `ch & 15` (channel `n` and
     /// `n+16` share a vector). Returns the raw 16-bit line mask.
     pub fn irq_lines16(&self) -> u16 {

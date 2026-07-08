@@ -148,6 +148,55 @@ fn edma_moves_a_block_through_the_bus() {
 }
 
 #[test]
+fn edma_drains_lpuart_rx_on_hardware_request() {
+    const LPUART1: u32 = 0x4018_4000;
+    const DMA: u32 = 0x400E_8000;
+    const DMAMUX: u32 = 0x400E_C000;
+    let mut soc = Rt1060::new();
+    soc.quiet();
+    let buf = 0x8000_2000;
+
+    // LPUART1: receiver enabled + BAUD.RDMAE (bit 21) → RX DMA requests.
+    soc.bus.write32(LPUART1 + 0x18, 1 << 18); // CTRL.RE
+    soc.bus.write32(LPUART1 + 0x10, 1 << 21); // BAUD.RDMAE
+    soc.push_console_input(b"DMA!"); // 4 bytes into the RX FIFO
+
+    // DMAMUX channel 0 → source 3 (LPUART1 Rx), enabled.
+    soc.bus.write32(DMAMUX, (1 << 31) | 3);
+
+    // TCD ch0: read DATA (fixed src), 1 byte per minor, 4 majors → buf.
+    let tcd = DMA + 0x1000;
+    soc.bus.write32(tcd, LPUART1 + 0x1C); // SADDR = DATA
+    soc.bus.write16(tcd + 0x04, 0); // SOFF = 0 (FIFO port)
+    soc.bus.write16(tcd + 0x06, 0); // ATTR = 8-bit
+    soc.bus.write32(tcd + 0x08, 1); // NBYTES = 1
+    soc.bus.write32(tcd + 0x10, buf); // DADDR
+    soc.bus.write16(tcd + 0x14, 1); // DOFF = +1
+    soc.bus.write16(tcd + 0x16, 4); // CITER = 4
+    soc.bus.write16(tcd + 0x1E, 4); // BITER = 4
+    soc.bus.write16(tcd + 0x1C, 1 << 3); // CSR.DREQ: disable on major-complete
+
+    // Enable the hardware request on channel 0 (SERQ).
+    soc.bus.write8(DMA + 0x1B, 0);
+
+    // Pump service passes; each moves one byte while the RX FIFO has data.
+    for _ in 0..8 {
+        soc.bus.edma_service_hw();
+    }
+    assert_eq!(
+        &[
+            soc.bus.read8(buf),
+            soc.bus.read8(buf + 1),
+            soc.bus.read8(buf + 2),
+            soc.bus.read8(buf + 3),
+        ],
+        b"DMA!"
+    );
+    // The major-complete DREQ disabled the channel's request.
+    assert_eq!(soc.bus.read32(DMA + 0x0C) & 1, 0, "ERQ[0] cleared by DREQ");
+}
+
+#[test]
 fn rgb_led_red_turns_on_active_low() {
     let mut soc = Rt1060::new();
     soc.quiet();

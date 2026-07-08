@@ -105,6 +105,9 @@ impl Rt1060 {
         let elapsed = self.core.cycles.wrapping_sub(before);
         self.cycles = self.cycles.wrapping_add(elapsed);
         self.bus.periph.tick(elapsed);
+        // Service DMA channels driven by peripheral hardware requests
+        // (cheap-gated: a no-op unless some channel has ERQ enabled).
+        self.bus.edma_service_hw();
 
         // Software-requested resets (SRC.SCR, SCB AIRCR.SYSRESETREQ).
         if self.core.sysreset_request || self.bus.periph.src.reset_requested {

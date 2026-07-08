@@ -105,6 +105,12 @@ impl Adc {
     pub fn irq_pending(&self) -> bool {
         (0..SLOTS).any(|n| self.coco & (1 << n) != 0 && self.hc[n] & HC_AIEN != 0)
     }
+
+    /// DMA request: `GC.DMAEN` set and a conversion complete (a DMA read of
+    /// the result register clears the flag).
+    pub fn dma_request(&self) -> bool {
+        self.gc & 0x2 != 0 && self.coco != 0
+    }
 }
 
 #[cfg(test)]

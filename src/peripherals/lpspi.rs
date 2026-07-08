@@ -40,6 +40,7 @@ pub struct LpSpi {
     pub index: u8,
     cr: u32,
     ier: u32,
+    der: u32,
     tcr: u32,
     /// Sticky status the driver clears via W1C (WCF/FCF/TCF).
     sr_sticky: u32,
@@ -53,6 +54,7 @@ impl LpSpi {
             index,
             cr: 0,
             ier: 0,
+            der: 0,
             tcr: 0,
             sr_sticky: 0,
             rx: VecDeque::new(),
@@ -111,6 +113,7 @@ impl LpSpi {
             }
             0x14 => self.sr_sticky &= !(value & (SR_WCF | SR_FCF | SR_TCF)),
             0x18 => self.ier = value,
+            0x1C => self.der = value, // DMA enable
             0x60 => self.tcr = value,
             0x64 => self.transmit(value), // TDR
             _ => {}
@@ -147,6 +150,16 @@ impl LpSpi {
 
     pub fn irq_pending(&self) -> bool {
         self.sr() & self.ier != 0
+    }
+
+    /// DMA transmit request: `DER.TDDE` set and the module ready to shift.
+    pub fn dma_tx_request(&self) -> bool {
+        self.der & 0x1 != 0 && self.cr & CR_MEN != 0
+    }
+
+    /// DMA receive request: `DER.RDDE` set and a word waiting.
+    pub fn dma_rx_request(&self) -> bool {
+        self.der & 0x2 != 0 && !self.rx.is_empty()
     }
 }
 

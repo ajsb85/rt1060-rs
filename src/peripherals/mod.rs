@@ -423,6 +423,38 @@ impl Peripherals {
         (self.core_hz, self.perclk_hz, self.uart_hz)
     }
 
+    /// Level of the DMA request line for a given DMAMUX `source` number
+    /// (MIMXRT1062.h `_dma_request_source`), used by the eDMA hardware-request
+    /// service. Unmodeled sources read low.
+    pub fn dma_request_level(&self, source: u32) -> bool {
+        match source {
+            2 => self.lpuart[0].dma_tx_request(),
+            3 => self.lpuart[0].dma_rx_request(),
+            66 => self.lpuart[1].dma_tx_request(),
+            67 => self.lpuart[1].dma_rx_request(),
+            13 => self.lpspi[0].dma_rx_request(),
+            14 => self.lpspi[0].dma_tx_request(),
+            77 => self.lpspi[1].dma_rx_request(),
+            78 => self.lpspi[1].dma_tx_request(),
+            17 => self.lpi2c[0].dma_request(),
+            81 => self.lpi2c[1].dma_request(),
+            24 => self.adc[0].dma_request(),
+            88 => self.adc[1].dma_request(),
+            _ => false,
+        }
+    }
+
+    /// Whether any eDMA channel has a hardware request enabled (cheap gate for
+    /// the per-step service).
+    pub fn edma_hw_enabled(&self) -> bool {
+        self.edma.hw_enabled()
+    }
+
+    /// Read a DMAMUX `CHCFG[ch]` (source routing) value.
+    pub fn dmamux_chcfg(&self, ch: usize) -> u32 {
+        self.dmamux.read(ch as u32 * 4)
+    }
+
     /// Assemble the level-sensitive external interrupt lines.
     pub fn irq_lines(&self) -> IrqMask {
         let mut m = IrqMask::ZERO;

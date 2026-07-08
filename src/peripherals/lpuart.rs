@@ -127,6 +127,16 @@ impl LpUart {
         }
     }
 
+    /// DMA transmit request: `BAUD.TDMAE` set and the transmitter ready.
+    pub fn dma_tx_request(&self) -> bool {
+        self.baud & (1 << 23) != 0 && self.ctrl & CTRL_TE != 0
+    }
+
+    /// DMA receive request: `BAUD.RDMAE` set and a byte waiting.
+    pub fn dma_rx_request(&self) -> bool {
+        self.baud & (1 << 21) != 0 && !self.rx.is_empty()
+    }
+
     /// Level-sensitive interrupt request: TDRE/TC (always ready when TE) or
     /// RDRF, each gated by its CTRL enable.
     pub fn irq_pending(&self) -> bool {
