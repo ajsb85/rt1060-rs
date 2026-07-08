@@ -1,0 +1,6 @@
+checklist:
+  - "Code is clean, readable, and adheres to the project coding standards."
+  - "cargo fmt, cargo clippy -D warnings, and cargo test all pass."
+  - "New behaviour is covered by unit tests asserting registers/flags."
+  - "Register semantics cite the CMSIS header / SVD / RM section in a comment."
+  - "ROADMAP.md checkboxes and README status table are updated when a milestone lands."

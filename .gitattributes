@@ -1,0 +1,28 @@
+# Normalize line endings: LF everywhere (we develop under WSL/Linux)
+* text=auto eol=lf
+
+# Rust sources
+*.rs text diff=rust
+*.toml text
+
+# Docs
+*.md text
+
+# Vendored reference material (SVD, CMSIS headers, Renode models) —
+# read-only, excluded from language stats
+refs/** linguist-vendored
+*.svd text
+*.cs text
+*.repl text
+*.resc text
+
+# Firmware test fixtures
+*.bin binary
+*.elf binary
+*.img binary
+*.uf2 binary
+*.hex text
+*.s37 text
+
+# Never diff lockfile noise as language
+Cargo.lock text -diff
