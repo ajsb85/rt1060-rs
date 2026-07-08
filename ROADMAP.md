@@ -133,8 +133,15 @@ use). Frequency math and the full pin table remain.
       the LittleFS console log over LPUART1
 - [x] Run the SwiftIO `Blink` example; **assert the RGB LED toggles** (RED/BLUE
       at the `sleep(ms:500)` interval) by SwiftIO logical id
-- [ ] Boot the MadMachine bootloader ("eboot") from FlexSPI flash + two-stage
-      `micro.img` verify/copy (bring-up loads the user image straight to SDRAM)
+- [x] Run **9 real SwiftIO Playground examples** end-to-end (ADC/PWM/I2C-sensors/
+      SPI-LCD/I2S/UART-RX), each driving a real peripheral with an emulated
+      device/input — `tests/boot_fixture.rs`
+- [x] **Boot the MadMachine `SerialLoader` recovery bootloader** (loads to ITCM,
+      brings up the full Zephyr stack + littlefs, logs "Recovery base Zephyr!") —
+      the prerequisite for emulating `mm download`
+- [ ] `mm download` over the framed serial protocol (SYNC/RAM/FLASH/VERIFY/
+      EXECUTE tags, 115200) to the running bootloader — needs the transport wired
+      (UART, or a USB-CDC device stack) and the download flow driven
 - [ ] HIL parity: compare against a physical SwiftIO Micro over USB-serial
 
 ## M9 — Tooling ⏳
