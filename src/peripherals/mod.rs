@@ -27,6 +27,7 @@ pub mod clocks;
 pub mod gpio;
 pub mod gpt;
 pub mod lpuart;
+pub mod pit;
 pub mod semc;
 pub mod src;
 pub mod wdog;
@@ -142,7 +143,7 @@ pub struct Peripherals {
     pub snvs: RawRegs,
     pub dcdc: RawRegs,
     pub ocotp: RawRegs,
-    pub pit: RawRegs,
+    pub pit: pit::Pit,
     pub semc: semc::Semc,
     pub gpt: [gpt::Gpt; 2],
     pub wdog1: wdog::Wdog,
@@ -189,7 +190,7 @@ impl Peripherals {
             // a real model (ROADMAP).
             dcdc: RawRegs::new("dcdc").with(0x00, 1 << 31),
             ocotp: RawRegs::new("ocotp"),
-            pit: RawRegs::new("pit"),
+            pit: pit::Pit::new(),
             semc: semc::Semc::new(),
             gpt: [gpt::Gpt::new(), gpt::Gpt::new()],
             wdog1: wdog::Wdog::new(wdog::Kind::Wdog),
@@ -308,6 +309,7 @@ impl Peripherals {
         if perclk_ticks != 0 {
             self.gpt[0].tick(perclk_ticks);
             self.gpt[1].tick(perclk_ticks);
+            self.pit.tick(perclk_ticks);
         }
     }
 
@@ -330,6 +332,9 @@ impl Peripherals {
         }
         if self.gpt[1].irq_pending() {
             m.set(irq::GPT2);
+        }
+        if self.pit.irq_pending() {
+            m.set(irq::PIT);
         }
         // GPIO1..2 combined lines (0..15 / 16..31). GPIO3+ combined lines
         // land in the ROADMAP as their pin banks come online.
