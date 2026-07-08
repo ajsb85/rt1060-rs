@@ -43,6 +43,13 @@ fn main() {
     };
     let mut soc = Rt1060::boot(&image);
     soc.quiet();
+    // Optionally attach an SD card image to USDHC1 (RT1060_SD=path/to/disk.img).
+    if let Ok(sd_path) = std::env::var("RT1060_SD") {
+        let img = std::fs::read(&sd_path).expect("read SD image");
+        let blocks = img.len() / 512;
+        soc.insert_sd_card(1, rt1060_rs::peripherals::usdhc::SdCard::new(img));
+        println!("attached SD card: {sd_path} ({blocks} blocks)");
+    }
     println!(
         "booted: SP={:#010x} PC={:#010x}  ({} PT_LOAD segments @ base {:#010x})",
         soc.core.regs[13],

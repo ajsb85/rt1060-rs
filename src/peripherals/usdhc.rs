@@ -12,8 +12,14 @@
 //! `DATA_BUFF_ACC_PORT` (with `PRES_STATE.BREN` + `INT_STATUS.BRR`); a write
 //! command consumes words written to the port into the card, block by block.
 //! `PRES_STATE` reports a stable clock, inserted card, and no command/data
-//! inhibit. ADMA/DMA (`DS_ADDR`/`ADMA_SYS_ADDR`), UHS tuning, and CMD12
-//! auto-stop are ROADMAP items.
+//! inhibit; the `SYS_CTRL` reset / init-active strobes self-clear so the
+//! driver's reset and card-activation polls terminate. This is enough for the
+//! real MadMachine Zephyr SD driver to run the full card-identification
+//! sequence (CMD0/8/ACMD41/CMD2/CMD3/CMD9/CMD7, ACMD51 SCR, the CMD6
+//! timing/driver-strength/current-limit switches) and mount a FAT filesystem
+//! off the card. ADMA/DMA (`DS_ADDR`/`ADMA_SYS_ADDR`) is unmodelled — the
+//! driver falls back to the PIO data path — and UHS tuning / CMD12 auto-stop
+//! are ROADMAP items.
 //!
 //! Register map (offsets): BLK_ATT 0x04, CMD_ARG 0x08, CMD_XFR_TYP 0x0C,
 //! CMD_RSP0..3 0x10..0x1C, DATA_BUFF_ACC_PORT 0x20, PRES_STATE 0x24,
@@ -32,6 +38,16 @@ const PRES_BWEN: u32 = 1 << 10; // buffer write enable
 const PRES_BREN: u32 = 1 << 11; // buffer read enable
 const PRES_CINST: u32 = 1 << 16; // card inserted
 
+// SYS_CTRL (0x2C): the reset / init-active strobes self-clear once the
+// controller has serviced them. The driver spins `while (SYS_CTRL & mask)`
+// with a bounded timeout, so leaving them set makes reset / card-activation
+// time out and the SD init fail (-EIO).
+const SYS_CTRL_SELF_CLEAR: u32 = (1 << 24) // RSTA  — reset all
+    | (1 << 25) // RSTC  — reset command line
+    | (1 << 26) // RSTD  — reset data line
+    | (1 << 27) // INITA — send 80 init clocks
+    | (1 << 28); // RSTT — reset tuning
+
 // INT_STATUS (0x30)
 const INT_CC: u32 = 1 << 0; // command complete
 const INT_TC: u32 = 1 << 1; // transfer complete
@@ -43,6 +59,9 @@ const INT_CTOE: u32 = 1 << 16; // command timeout error
 pub struct SdCard {
     image: Vec<u8>,
     rca: u16,
+    /// Number of block-read commands the host has issued (a probe for tests
+    /// that the firmware's SD init reached the data phase).
+    reads: u32,
 }
 
 impl SdCard {
@@ -52,7 +71,11 @@ impl SdCard {
         if rem != 0 {
             image.resize(image.len() + (BLOCK - rem), 0);
         }
-        Self { image, rca: 0 }
+        Self {
+            image,
+            rca: 0,
+            reads: 0,
+        }
     }
 
     /// A blank card of `blocks` × 512 bytes.
@@ -60,6 +83,7 @@ impl SdCard {
         Self {
             image: vec![0; blocks * BLOCK],
             rca: 0,
+            reads: 0,
         }
     }
 
@@ -67,7 +91,13 @@ impl SdCard {
         self.image.len() / BLOCK
     }
 
-    fn read_span(&self, block: u32, count: u32) -> Vec<u8> {
+    /// How many block-read commands this card has served.
+    pub fn reads(&self) -> u32 {
+        self.reads
+    }
+
+    fn read_span(&mut self, block: u32, count: u32) -> Vec<u8> {
+        self.reads += 1;
         let start = block as usize * BLOCK;
         let end = (start + count as usize * BLOCK).min(self.image.len());
         let mut v = self.image[start.min(self.image.len())..end].to_vec();
@@ -121,7 +151,11 @@ impl SdCard {
                 r.resp[0] = (u32::from(self.rca) << 16) | 0x0500; // R6
             }
             9 => r.resp = csd(self.block_count()), // CMD9 SEND_CSD (R2)
-            7 | 16 | 12 | 13 | 6 => r.resp[0] = 0x0000_0900, // R1: tran state, ready
+            6 => {
+                r.read = switch_status(arg).to_vec();
+                r.resp[0] = 0x0000_0900;
+            }
+            7 | 16 | 12 | 13 => r.resp[0] = 0x0000_0900, // R1: tran state, ready
             17 | 18 => {
                 let blocks = if idx == 17 { 1 } else { count };
                 r.read = self.read_span(arg, blocks);
@@ -140,6 +174,32 @@ impl SdCard {
 /// SCR register (SD spec 3.0, 1-bit + 4-bit bus, physical spec 2.0).
 fn scr() -> Vec<u8> {
     vec![0x02, 0x35, 0x80, 0x00, 0x00, 0x00, 0x00, 0x00]
+}
+
+/// SD SWITCH_FUNC (CMD6) status: 64 data bytes, MSB-first. Advertise every
+/// function in every group as supported, and echo the requested function (per
+/// group) as the selected one, so the host's timing / driver-strength /
+/// current-limit switches all succeed and it proceeds to read blocks. `arg` is
+/// the CMD6 argument; a `0xF` nibble for a group means "query, no change".
+fn switch_status(arg: u32) -> [u8; 64] {
+    let mut d = [0u8; 64];
+    // The six 16-bit function-group support bitmaps sit in bytes 2..14; set
+    // every advertised function bit so any requested function is "supported".
+    for b in &mut d[2..14] {
+        *b = 0xFF;
+    }
+    // The host reads the selected functions for groups 0..3 as
+    // `(d[15] << 8) | d[16]` (4 bits per group). Echo each requested nibble.
+    let mut selected = 0u32;
+    for g in 0..4 {
+        let nib = (arg >> (g * 4)) & 0xF;
+        if nib != 0xF {
+            selected |= nib << (g * 4);
+        }
+    }
+    d[15] = (selected >> 8) as u8;
+    d[16] = selected as u8;
+    d
 }
 
 /// A plausible CID (R2), packed as the USDHC latches it into RSP3..RSP0.
@@ -198,6 +258,11 @@ impl Usdhc {
         self.card = Some(card);
     }
 
+    /// Number of block reads the attached card has served (0 if no card).
+    pub fn card_reads(&self) -> u32 {
+        self.card.as_ref().map_or(0, SdCard::reads)
+    }
+
     fn pres_state(&self) -> u32 {
         let mut s = PRES_SDSTB; // clock always stable
         if self.card.is_some() {
@@ -230,8 +295,9 @@ impl Usdhc {
                 self.regs[3] = value; // stash CMD_XFR_TYP
                 self.dispatch(value);
             }
-            0x20 => self.push_write_word(value), // DATA port
-            0x30 => self.int_status &= !value,   // INT_STATUS is W1C
+            0x2C => self.regs[0x0B] = value & !SYS_CTRL_SELF_CLEAR, // SYS_CTRL strobes self-clear
+            0x20 => self.push_write_word(value),                    // DATA port
+            0x30 => self.int_status &= !value,                      // INT_STATUS is W1C
             _ => self.regs[(offset >> 2) as usize & 0xFF] = value,
         }
     }
@@ -382,5 +448,49 @@ mod tests {
         let mut u = Usdhc::new(1);
         issue(&mut u, 0, 0);
         assert_ne!(u.read(0x30) & INT_CTOE, 0, "command timeout without a card");
+    }
+
+    #[test]
+    fn sys_ctrl_reset_and_init_strobes_self_clear() {
+        let mut u = Usdhc::new(1);
+        // The driver spins `while (SYS_CTRL & mask)` on RSTA/RSTC/RSTD/INITA
+        // with a bounded timeout, so these bits must read back clear.
+        u.write(0x2C, 0x090F_40A0); // INITA | RSTA-era clock config
+        let sysctl = u.read(0x2C);
+        assert_eq!(
+            sysctl & SYS_CTRL_SELF_CLEAR,
+            0,
+            "reset/init strobes cleared"
+        );
+        assert_eq!(sysctl, 0x000F_40A0, "the clock-divider bits stick");
+    }
+
+    #[test]
+    fn switch_func_advertises_and_echoes_the_requested_function() {
+        // CMD6 driver-strength check: group 2 (bits 11:8) requests function 0,
+        // the host expects it "supported" and "selected" or SD init aborts.
+        let d = switch_status(0x00FF_F0FF);
+        let sel = ((d[15] as u32) << 8) | d[16] as u32;
+        assert_eq!((sel >> (2 * 4)) & 0xF, 0, "group 2 selected == function 0");
+        let grp2_support = ((d[10] as u32) << 8) | d[11] as u32;
+        assert_ne!(grp2_support & 1, 0, "group 2 function 0 advertised");
+
+        // High-speed timing: group 0 requests function 1.
+        let d = switch_status(0x80FF_FFF1);
+        let sel = ((d[15] as u32) << 8) | d[16] as u32;
+        assert_eq!(sel & 0xF, 1, "group 0 selected == function 1 (high speed)");
+    }
+
+    #[test]
+    fn switch_func_command_returns_a_64_byte_data_phase() {
+        let mut u = Usdhc::new(1);
+        u.insert(card_with_pattern());
+        u.write(0x04, 1 << 16 | 64); // BLK_ATT: 1 block × 64 bytes
+        issue(&mut u, 6, 0x00FF_F0FF); // CMD6 SWITCH_FUNC (driver strength)
+        assert_ne!(u.read(0x30) & INT_BRR, 0, "switch status data is ready");
+        // 64 bytes = 16 words must be drainable (else the host's poll hangs).
+        for _ in 0..16 {
+            let _ = u.read(0x20);
+        }
     }
 }

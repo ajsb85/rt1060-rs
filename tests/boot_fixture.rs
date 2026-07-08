@@ -161,6 +161,36 @@ fn madmachine_swiftio_blink_toggles_the_led() {
     );
 }
 
+/// Deep check: attach an SD card and confirm the real MadMachine Zephyr SD
+/// driver runs its full init — controller reset, the CMD0/8/ACMD41/CMD2/CMD3/
+/// CMD9/CMD7 identification, ACMD51 SCR, and the CMD6 timing / driver-strength
+/// / current-limit switches — and reaches the block-read data phase (the
+/// card-init read of sector 0). A blank card is enough: reaching the read at
+/// all proves the SYS_CTRL reset strobes self-cleared and the CMD6 switches
+/// were accepted. Ignored by default (tens of millions of instructions);
+/// run with `cargo test --release -- --ignored`.
+#[test]
+#[ignore = "runs ~40M instructions through Zephyr; cargo test --release -- --ignored"]
+fn madmachine_initializes_an_attached_sd_card() {
+    use rt1060_rs::peripherals::usdhc::SdCard;
+    const BLINK: &[u8] = include_bytes!("fixtures/madmachine_swiftio_blink.elf");
+    let image = loader::load_elf(BLINK).expect("parse ELF");
+    let mut soc = Rt1060::boot(&image);
+    soc.quiet();
+    soc.insert_sd_card(1, SdCard::blank(2048)); // a 1 MiB card, no filesystem
+
+    for _ in 0..45_000_000u64 {
+        soc.step();
+        if soc.bus.periph.usdhc[0].card_reads() > 0 {
+            break;
+        }
+    }
+    assert!(
+        soc.bus.periph.usdhc[0].card_reads() > 0,
+        "the SD driver should complete init and read a block from the card"
+    );
+}
+
 /// Deep check: run long enough for the delay loop to elapse and observe the
 /// LED actually toggle. Ignored by default (hundreds of millions of
 /// instructions); run with `cargo test --release -- --ignored`.
