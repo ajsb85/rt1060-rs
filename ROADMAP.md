@@ -95,7 +95,8 @@ use). Frequency math and the full pin table remain.
       driven through the system bus; software START + action registers
 - [x] **PIT** full 4-channel model (cascade, PERCLK, IRQ 122)
 - [x] **LPI2C** ×2 master with a pluggable `I2cDevice` hook (+ `MemI2cDevice`)
-- [x] **LPSPI** ×2 full-duplex master with an `SpiDevice` hook (+ `SeqSpiDevice`)
+- [x] **LPSPI** ×4 full-duplex master with an `SpiDevice` hook (+ `SeqSpiDevice`);
+      SwiftIO `Id.SPI0` is LPSPI3 — the real ST7789 LCD renders over it
 - [x] **ADC** ×2 (12-bit, programmable channel inputs, COCO/AIEN IRQ 67/68)
 - [x] DMAMUX request routing + hardware-request triggering (source→channel)
 - [x] PWM: FlexPWM (duty observability) + **QTMR** (PERCLK counting, IRQ)
