@@ -127,3 +127,12 @@ MadMachine SDK: the MadDrivers `ST7789` driver over `SPI(Id.SPI0)` filling a
 (`LPSPI_MasterTransferNonBlocking` + `spi_context_wait`). `tests/boot_fixture.rs`
 attaches a recording display and asserts a full red screen (57 600 `0xF8`
 pixel bytes) is written over SPI.
+
+### `madmachine_swiftio_uart.elf`
+
+The **real MadMachine SerialLEDSwitch example** (SwiftIO Playground
+`10UART/SerialLEDSwitch`): reads `UART(Id.UART0)` and turns LED `D18` on for
+`"1"`, off for `"0"`. SwiftIO `Id.UART0` is **LPUART2**; the RX path is
+interrupt-driven (RDRF → IRQ 21 ISR → ring buffer). `tests/boot_fixture.rs`
+pushes bytes into the LPUART2 RX FIFO and asserts the LED (`swiftio_pin(18)`)
+follows — the first real-firmware validation of serial **input**.

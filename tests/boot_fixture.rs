@@ -161,6 +161,46 @@ fn madmachine_swiftio_blink_toggles_the_led() {
     );
 }
 
+/// The **real MadMachine SerialLEDSwitch example** (`10UART/SerialLEDSwitch`):
+/// reads `UART(Id.UART0)` and turns LED `D18` on for `"1"`, off for `"0"`.
+/// SwiftIO `Id.UART0` is LPUART2; the SwiftIO HAL RX path is interrupt-driven
+/// (RDRF → IRQ 21 ISR fills a ring buffer). This drives the emulator's LPUART
+/// **RX** — the first real-firmware validation of serial *input* — and observes
+/// the GPIO response by SwiftIO id. Ignored by default.
+#[test]
+#[ignore = "runs ~70M instructions through Zephyr; cargo test --release -- --ignored"]
+fn madmachine_uart_rx_switches_the_led() {
+    const UART: &[u8] = include_bytes!("fixtures/madmachine_swiftio_uart.elf");
+    let image = loader::load_elf(UART).expect("parse ELF");
+    let mut soc = Rt1060::boot(&image);
+    soc.quiet();
+    // Boot to the main polling loop.
+    for _ in 0..40_000_000u64 {
+        soc.step();
+    }
+    assert_eq!(soc.swiftio_pin(18), Some(false), "LED D18 starts off");
+
+    // Send "1" over UART0 (LPUART2 = index 1) → LED on.
+    soc.bus.periph.lpuart[1].rx_push(b'1');
+    for _ in 0..20_000_000u64 {
+        soc.step();
+        if soc.swiftio_pin(18) == Some(true) {
+            break;
+        }
+    }
+    assert_eq!(soc.swiftio_pin(18), Some(true), "\"1\" turns the LED on");
+
+    // Send "0" → LED off.
+    soc.bus.periph.lpuart[1].rx_push(b'0');
+    for _ in 0..20_000_000u64 {
+        soc.step();
+        if soc.swiftio_pin(18) == Some(false) {
+            break;
+        }
+    }
+    assert_eq!(soc.swiftio_pin(18), Some(false), "\"0\" turns the LED off");
+}
+
 /// The **real MadMachine LCD example** (`08LCD`): the MadDrivers `ST7789`
 /// driver over `SPI(Id.SPI0)` filling a 240×240 display with solid colours.
 /// SwiftIO `Id.SPI0` is LPSPI3; the driver is interrupt-driven
