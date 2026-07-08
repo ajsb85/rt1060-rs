@@ -170,6 +170,19 @@ impl Rt1060 {
         self.bus.periph.clock_hz().1
     }
 
+    /// Configured duty cycle (0.0..=1.0) of a FlexPWM output, or `None` when
+    /// the output is disabled / unconfigured. `instance` is 1..4, `submodule`
+    /// 0..3.
+    pub fn pwm_duty(
+        &self,
+        instance: u8,
+        submodule: usize,
+        chan: crate::peripherals::pwm::Chan,
+    ) -> Option<f64> {
+        let i = instance.checked_sub(1)? as usize;
+        self.bus.periph.pwm.get(i)?.duty(submodule, chan)
+    }
+
     /// The onboard RGB LED **on** states `(red, green, blue)`. The LED is
     /// active-low, so a channel is on when its GPIO1 pin is driven low (and
     /// configured as an output). See [`board`] for the wiring/sources.

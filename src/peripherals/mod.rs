@@ -32,6 +32,7 @@ pub mod lpi2c;
 pub mod lpspi;
 pub mod lpuart;
 pub mod pit;
+pub mod pwm;
 pub mod semc;
 pub mod src;
 pub mod wdog;
@@ -97,6 +98,10 @@ pub mod base {
     pub const SRC: u32 = 0x400F_8000;
     pub const CCM: u32 = 0x400F_C000;
     pub const SEMC: u32 = 0x402F_0000;
+    pub const PWM1: u32 = 0x403D_C000;
+    pub const PWM2: u32 = 0x403E_0000;
+    pub const PWM3: u32 = 0x403E_4000;
+    pub const PWM4: u32 = 0x403E_8000;
     pub const LPI2C1: u32 = 0x403F_0000;
     pub const LPI2C2: u32 = 0x403F_4000;
     pub const LPSPI1: u32 = 0x4039_4000;
@@ -171,6 +176,8 @@ pub struct Peripherals {
     pub lpspi: [lpspi::LpSpi; 2],
     /// ADC1/2 (index 0 = ADC1).
     pub adc: [adc::Adc; 2],
+    /// FlexPWM1..4 (index 0 = PWM1).
+    pub pwm: [pwm::Pwm; 4],
     pub gpt: [gpt::Gpt; 2],
     pub wdog1: wdog::Wdog,
     pub wdog2: wdog::Wdog,
@@ -224,6 +231,7 @@ impl Peripherals {
             lpi2c: [lpi2c::LpI2c::new(1), lpi2c::LpI2c::new(2)],
             lpspi: [lpspi::LpSpi::new(1), lpspi::LpSpi::new(2)],
             adc: [adc::Adc::new(1), adc::Adc::new(2)],
+            pwm: std::array::from_fn(|i| pwm::Pwm::new(i as u8 + 1)),
             gpt: [gpt::Gpt::new(), gpt::Gpt::new()],
             wdog1: wdog::Wdog::new(wdog::Kind::Wdog),
             wdog2: wdog::Wdog::new(wdog::Kind::Wdog),
@@ -283,6 +291,10 @@ impl Peripherals {
             base::LPSPI2 => self.lpspi[1].read(off),
             base::ADC1 => self.adc[0].read(off),
             base::ADC2 => self.adc[1].read(off),
+            base::PWM1 => self.pwm[0].read32(off),
+            base::PWM2 => self.pwm[1].read32(off),
+            base::PWM3 => self.pwm[2].read32(off),
+            base::PWM4 => self.pwm[3].read32(off),
             base::GPT1 => self.gpt[0].read(off),
             base::GPT2 => self.gpt[1].read(off),
             base::WDOG1 => self.wdog1.read(off),
@@ -321,6 +333,10 @@ impl Peripherals {
             base::LPSPI2 => self.lpspi[1].write(off, value),
             base::ADC1 => self.adc[0].write(off, value),
             base::ADC2 => self.adc[1].write(off, value),
+            base::PWM1 => self.pwm[0].write32(off, value),
+            base::PWM2 => self.pwm[1].write32(off, value),
+            base::PWM3 => self.pwm[2].write32(off, value),
+            base::PWM4 => self.pwm[3].write32(off, value),
             base::GPT1 => self.gpt[0].write(off, value),
             base::GPT2 => self.gpt[1].write(off, value),
             base::WDOG1 => self.wdog1.write(off, value),
@@ -346,25 +362,46 @@ impl Peripherals {
     // the replicate-to-word path ordinary word registers use. The bus routes
     // 8/16-bit peripheral access through these methods.
 
+    /// Index of the FlexPWM instance for a base, if it is one.
+    #[inline]
+    fn pwm_index(base: u32) -> Option<usize> {
+        match base {
+            base::PWM1 => Some(0),
+            base::PWM2 => Some(1),
+            base::PWM3 => Some(2),
+            base::PWM4 => Some(3),
+            _ => None,
+        }
+    }
+
     pub fn read8(&mut self, addr: u32) -> u8 {
-        if addr & !0x3FFF == base::DMA0 {
-            self.edma.read8(addr & 0x3FFF)
+        let (b, off) = (addr & !0x3FFF, addr & 0x3FFF);
+        if b == base::DMA0 {
+            self.edma.read8(off)
+        } else if let Some(i) = Self::pwm_index(b) {
+            self.pwm[i].read8(off)
         } else {
             (self.read(addr & !0x3) >> ((addr & 0x3) * 8)) as u8
         }
     }
 
     pub fn read16(&mut self, addr: u32) -> u16 {
-        if addr & !0x3FFF == base::DMA0 {
-            self.edma.read16(addr & 0x3FFF)
+        let (b, off) = (addr & !0x3FFF, addr & 0x3FFF);
+        if b == base::DMA0 {
+            self.edma.read16(off)
+        } else if let Some(i) = Self::pwm_index(b) {
+            self.pwm[i].read16(off)
         } else {
             (self.read(addr & !0x3) >> ((addr & 0x2) * 8)) as u16
         }
     }
 
     pub fn write8(&mut self, addr: u32, value: u8) {
-        if addr & !0x3FFF == base::DMA0 {
-            self.edma.write8(addr & 0x3FFF, value);
+        let (b, off) = (addr & !0x3FFF, addr & 0x3FFF);
+        if b == base::DMA0 {
+            self.edma.write8(off, value);
+        } else if let Some(i) = Self::pwm_index(b) {
+            self.pwm[i].write8(off, value);
         } else {
             let v = u32::from(value);
             self.write(addr & !0x3, v << 24 | v << 16 | v << 8 | v);
@@ -372,8 +409,11 @@ impl Peripherals {
     }
 
     pub fn write16(&mut self, addr: u32, value: u16) {
-        if addr & !0x3FFF == base::DMA0 {
-            self.edma.write16(addr & 0x3FFF, value);
+        let (b, off) = (addr & !0x3FFF, addr & 0x3FFF);
+        if b == base::DMA0 {
+            self.edma.write16(off, value);
+        } else if let Some(i) = Self::pwm_index(b) {
+            self.pwm[i].write16(off, value);
         } else {
             let v = u32::from(value);
             self.write(addr & !0x3, v << 16 | v);

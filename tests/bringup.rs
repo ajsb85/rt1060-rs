@@ -197,6 +197,25 @@ fn edma_drains_lpuart_rx_on_hardware_request() {
 }
 
 #[test]
+fn flexpwm_duty_observable_through_the_bus() {
+    use rt1060_rs::peripherals::pwm::Chan;
+    const PWM1: u32 = 0x403D_C000;
+    let mut soc = Rt1060::new();
+    soc.quiet();
+    // Submodule 0: INIT=0, VAL1=1000 (period), VAL2=0, VAL3=750 (75% on A).
+    // Registers are 16-bit and packed, so the bus does width-accurate writes.
+    soc.bus.write16(PWM1 + 0x02, 0); // INIT
+    soc.bus.write16(PWM1 + 0x0E, 1000); // VAL1
+    soc.bus.write16(PWM1 + 0x12, 0); // VAL2
+    soc.bus.write16(PWM1 + 0x16, 750); // VAL3
+    assert_eq!(soc.pwm_duty(1, 0, Chan::A), None, "not live until OUTEN");
+    soc.bus.write16(PWM1 + 0x180, 1 << 8); // OUTEN.PWMA_EN submodule 0
+    assert_eq!(soc.pwm_duty(1, 0, Chan::A), Some(0.75));
+    // The packed sibling (CNT at 0x00) was untouched by the INIT write.
+    assert_eq!(soc.bus.read16(PWM1), 0);
+}
+
+#[test]
 fn rgb_led_red_turns_on_active_low() {
     let mut soc = Rt1060::new();
     soc.quiet();
