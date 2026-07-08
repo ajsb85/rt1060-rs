@@ -35,6 +35,7 @@ pub mod lpuart;
 pub mod pit;
 pub mod pwm;
 pub mod qtmr;
+pub mod sai;
 pub mod semc;
 pub mod src;
 pub mod usb;
@@ -84,6 +85,9 @@ impl RawRegs {
 /// on `addr & !0x3FFF`, so every entry here is 16 KiB-aligned.
 pub mod base {
     // AIPS-1 .. AIPS-4 modeled blocks (subset; extend per ROADMAP).
+    pub const SAI1: u32 = 0x4038_4000;
+    pub const SAI2: u32 = 0x4038_8000;
+    pub const SAI3: u32 = 0x4038_C000;
     pub const CAN1: u32 = 0x401D_0000;
     pub const CAN2: u32 = 0x401D_4000;
     pub const CAN3: u32 = 0x401D_8000;
@@ -174,6 +178,9 @@ pub mod irq {
     pub const CAN1: u32 = 36;
     pub const CAN2: u32 = 37;
     pub const CAN3: u32 = 154;
+    pub const SAI1: u32 = 56;
+    pub const SAI2: u32 = 57;
+    pub const SAI3: u32 = 58;
 }
 
 // ---------------------------------------------------------------------------
@@ -211,6 +218,8 @@ pub struct Peripherals {
     pub usb: usb::Usb,
     /// FlexCAN1..3 (index 0 = CAN1).
     pub flexcan: [flexcan::FlexCan; 3],
+    /// SAI1..3 (index 0 = SAI1).
+    pub sai: [sai::Sai; 3],
     pub gpt: [gpt::Gpt; 2],
     pub wdog1: wdog::Wdog,
     pub wdog2: wdog::Wdog,
@@ -269,6 +278,7 @@ impl Peripherals {
             usdhc: [usdhc::Usdhc::new(1), usdhc::Usdhc::new(2)],
             usb: usb::Usb::new(),
             flexcan: std::array::from_fn(|i| flexcan::FlexCan::new(i as u8 + 1)),
+            sai: std::array::from_fn(|i| sai::Sai::new(i as u8 + 1)),
             gpt: [gpt::Gpt::new(), gpt::Gpt::new()],
             wdog1: wdog::Wdog::new(wdog::Kind::Wdog),
             wdog2: wdog::Wdog::new(wdog::Kind::Wdog),
@@ -328,6 +338,9 @@ impl Peripherals {
             base::CAN1 => self.flexcan[0].read(off),
             base::CAN2 => self.flexcan[1].read(off),
             base::CAN3 => self.flexcan[2].read(off),
+            base::SAI1 => self.sai[0].read(off),
+            base::SAI2 => self.sai[1].read(off),
+            base::SAI3 => self.sai[2].read(off),
             base::LPI2C1 => self.lpi2c[0].read(off),
             base::LPI2C2 => self.lpi2c[1].read(off),
             base::LPSPI1 => self.lpspi[0].read(off),
@@ -380,6 +393,9 @@ impl Peripherals {
             base::CAN1 => self.flexcan[0].write(off, value),
             base::CAN2 => self.flexcan[1].write(off, value),
             base::CAN3 => self.flexcan[2].write(off, value),
+            base::SAI1 => self.sai[0].write(off, value),
+            base::SAI2 => self.sai[1].write(off, value),
+            base::SAI3 => self.sai[2].write(off, value),
             base::LPI2C1 => self.lpi2c[0].write(off, value),
             base::LPI2C2 => self.lpi2c[1].write(off, value),
             base::LPSPI1 => self.lpspi[0].write(off, value),
@@ -613,6 +629,11 @@ impl Peripherals {
         for (i, c) in self.flexcan.iter().enumerate() {
             if c.irq_pending() {
                 m.set([irq::CAN1, irq::CAN2, irq::CAN3][i]);
+            }
+        }
+        for (i, s) in self.sai.iter().enumerate() {
+            if s.irq_pending() {
+                m.set([irq::SAI1, irq::SAI2, irq::SAI3][i]);
             }
         }
         if self.lpi2c[0].irq_pending() {
