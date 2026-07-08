@@ -51,7 +51,11 @@ const T_BITER: u32 = 0x1E;
 const CSR_START: u16 = 1 << 0;
 const CSR_INTMAJOR: u16 = 1 << 1;
 const CSR_DREQ: u16 = 1 << 3;
+const CSR_ESG: u16 = 1 << 4; // enable scatter-gather (load next TCD)
+const CSR_MAJORELINK: u16 = 1 << 5; // link to another channel on major-complete
 const CSR_DONE: u16 = 1 << 7;
+// CSR.MAJORLINKCH = bits [12:8].
+const CSR_MAJORLINKCH_SHIFT: u16 = 8;
 
 pub struct Edma {
     /// 16 KiB register window; only the TCD area (0x1000+) is stored here.
@@ -232,7 +236,7 @@ impl Edma {
         let biter = self.rd16(base + T_BITER) & 0x7FFF;
         let slast = self.rd32(base + T_SLAST) as i32 as i64;
         let dlast = self.rd32(base + T_DLAST) as i32 as i64;
-        let mut csr = self.rd16(base + T_CSR);
+        let csr = self.rd16(base + T_CSR);
 
         let ssize = 1u32 << ((attr >> 8) & 0x7);
         let dsize = 1u32 << (attr & 0x7);
@@ -256,25 +260,45 @@ impl Edma {
             moved += step;
         }
 
-        // Major loop bookkeeping.
+        // Not the end of the major loop yet: write back the advanced state.
         citer = citer.wrapping_sub(1);
-        if citer == 0 {
-            citer = biter;
-            saddr = (saddr as i64 + slast) as u32;
-            daddr = (daddr as i64 + dlast) as u32;
-            if csr & CSR_INTMAJOR != 0 {
-                self.int_req |= 1 << ch;
-            }
-            if csr & CSR_DREQ != 0 {
-                self.erq &= !(1 << ch);
-            }
-            csr |= CSR_DONE;
+        if citer != 0 {
+            self.wr32(base + T_SADDR, saddr);
+            self.wr32(base + T_DADDR, daddr);
+            self.wr16(base + T_CITER, citer);
+            return;
         }
 
-        self.wr32(base + T_SADDR, saddr);
-        self.wr32(base + T_DADDR, daddr);
-        self.wr16(base + T_CITER, citer);
-        self.wr16(base + T_CSR, csr);
+        // Major loop complete.
+        if csr & CSR_INTMAJOR != 0 {
+            self.int_req |= 1 << ch;
+        }
+        if csr & CSR_DREQ != 0 {
+            self.erq &= !(1 << ch);
+        }
+        if csr & CSR_MAJORELINK != 0 {
+            // Kick the linked channel's software START.
+            let lch = (csr >> CSR_MAJORLINKCH_SHIFT) & 0x1F;
+            let lcsr = TCD_BASE + u32::from(lch) * TCD_STEP + T_CSR;
+            let v = self.rd16(lcsr) | CSR_START;
+            self.wr16(lcsr, v);
+        }
+        if csr & CSR_ESG != 0 {
+            // Scatter-gather: DLAST_SGA points at the next TCD, which fully
+            // replaces this channel's descriptor (loaded through the bus).
+            let sga = dlast as u32;
+            for i in 0..8u32 {
+                let w = bus.read32(sga + i * 4);
+                self.wr32(base + i * 4, w);
+            }
+            return; // the new TCD is now in place
+        }
+
+        // Ordinary reload: refill CITER, apply the last-adjustments, mark done.
+        self.wr32(base + T_SADDR, (saddr as i64 + slast) as u32);
+        self.wr32(base + T_DADDR, (daddr as i64 + dlast) as u32);
+        self.wr16(base + T_CITER, biter);
+        self.wr16(base + T_CSR, csr | CSR_DONE);
     }
 
     /// Whether any channel has its hardware request enabled (`ERQ`). The bus
@@ -336,6 +360,64 @@ mod tests {
 
     fn tcd(ch: u32, off: u32) -> u32 {
         TCD_BASE + ch * TCD_STEP + off
+    }
+
+    /// Build a 32-bit-transfer, one-major-loop TCD in memory (for scatter-
+    /// gather), moving `nbytes` from `src` to `dst`.
+    fn build_tcd(mem: &mut FlatMem, at: u32, src: u32, dst: u32, nbytes: u32) {
+        mem.write32(at + T_SADDR, src);
+        mem.write16(at + T_ATTR, (2 << 8) | 2); // 32-bit
+        mem.write32(at + T_NBYTES, nbytes);
+        mem.write32(at + T_DADDR, dst);
+        mem.write16(at + T_CITER, 1);
+        mem.write16(at + T_BITER, 1);
+    }
+
+    #[test]
+    fn scatter_gather_loads_the_next_tcd() {
+        let mut mem = FlatMem(vec![0; 0x1_0000]);
+        mem.write32(0x100, 0xAAAA_AAAA);
+        mem.write32(0x200, 0xBBBB_BBBB);
+        // Second descriptor lives in memory at 0x400: 0x200 → 0x2000.
+        build_tcd(&mut mem, 0x400, 0x200, 0x2000, 4);
+
+        let mut e = Edma::new();
+        // First descriptor: 0x100 → 0x1000, then scatter-gather to 0x400.
+        build_in_engine(&mut e, 0, 0x100, 0x1000, 4);
+        e.write32(tcd(0, T_DLAST), 0x400); // DLAST_SGA = next TCD
+        e.write16(tcd(0, T_CSR), CSR_ESG);
+        e.write8(0x1D, 0); // SSRT ch0
+        e.service(&mut mem, &[]);
+        assert_eq!(mem.read32(0x1000), 0xAAAA_AAAA, "first transfer");
+
+        // The engine loaded the descriptor at 0x400; restart the channel.
+        e.write8(0x1D, 0);
+        e.service(&mut mem, &[]);
+        assert_eq!(mem.read32(0x2000), 0xBBBB_BBBB, "scatter-gather transfer");
+    }
+
+    #[test]
+    fn major_link_starts_another_channel() {
+        let mut mem = FlatMem(vec![0; 0x1000]);
+        mem.write32(0x10, 0x1234_5678);
+        let mut e = Edma::new();
+        build_in_engine(&mut e, 0, 0x10, 0x20, 4);
+        e.write16(tcd(0, T_CSR), CSR_MAJORELINK | (1 << CSR_MAJORLINKCH_SHIFT)); // link ch1
+        build_in_engine(&mut e, 1, 0x10, 0x30, 4);
+        e.write8(0x1D, 0); // SSRT ch0
+        e.service(&mut mem, &[]); // ch0 runs → starts ch1 → ch1 runs this pass
+        assert_eq!(mem.read32(0x20), 0x1234_5678);
+        assert_eq!(mem.read32(0x30), 0x1234_5678, "linked channel 1 ran");
+    }
+
+    /// Program a 32-bit, one-major-loop TCD directly into the engine.
+    fn build_in_engine(e: &mut Edma, ch: u32, src: u32, dst: u32, nbytes: u32) {
+        e.write32(tcd(ch, T_SADDR), src);
+        e.write16(tcd(ch, T_ATTR), (2 << 8) | 2);
+        e.write32(tcd(ch, T_NBYTES), nbytes);
+        e.write32(tcd(ch, T_DADDR), dst);
+        e.write16(tcd(ch, T_CITER), 1);
+        e.write16(tcd(ch, T_BITER), 1);
     }
 
     #[test]
