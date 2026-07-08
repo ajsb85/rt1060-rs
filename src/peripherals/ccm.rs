@@ -36,6 +36,12 @@ impl Ccm {
         (offset >> 2) as usize & 0x3F
     }
 
+    /// Side-effect-free register snapshot (for the clock-tree computation).
+    #[inline]
+    pub fn reg(&self, offset: u32) -> u32 {
+        self.regs[Self::idx(offset)]
+    }
+
     pub fn read(&mut self, offset: u32) -> u32 {
         match offset {
             0x48 => 0, // CDHIPR: no handshake ever busy

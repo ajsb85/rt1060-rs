@@ -71,6 +71,22 @@ fn clock_and_sdram_bringup_polls_all_terminate() {
 }
 
 #[test]
+fn swiftio_600mhz_clock_config_reads_back() {
+    let mut soc = Rt1060::new();
+    soc.quiet();
+    // BOARD_BootClockRUN: ARM PLL DIV_SELECT=100, ARM_PODF=1 (÷2), AHB_PODF=0,
+    // IPG_PODF=3 (÷4), PERCLK from OSC 24 MHz.
+    soc.bus.write32(CCM_ANALOG, 100 | (1 << 13)); // PLL_ARM: DIV_SELECT=100|ENABLE
+    soc.bus.write32(CCM + 0x10, 1); // CACRR.ARM_PODF = 1
+    soc.bus.write32(CCM + 0x14, 3 << 8); // CBCDR: IPG_PODF=3
+    soc.bus.write32(CCM + 0x18, 3 << 18); // CBCMR: PRE_PERIPH_CLK_SEL = PLL1
+    soc.bus.write32(CCM + 0x1C, 1 << 6); // CSCMR1: PERCLK from OSC 24 MHz
+    assert_eq!(soc.core_hz(), 600_000_000, "core = 600 MHz");
+    assert_eq!(soc.perclk_hz(), 24_000_000, "perclk = 24 MHz");
+    assert_eq!(soc.clocks().ipg, 150_000_000, "ipg = 150 MHz");
+}
+
+#[test]
 fn rgb_led_red_turns_on_active_low() {
     let mut soc = Rt1060::new();
     soc.quiet();

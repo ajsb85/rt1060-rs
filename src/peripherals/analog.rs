@@ -69,6 +69,13 @@ impl CcmAnalog {
         v
     }
 
+    /// Side-effect-free base-register snapshot (for the clock-tree
+    /// computation): the stored value, without the forced status bits.
+    #[inline]
+    pub fn reg(&self, offset: u32) -> u32 {
+        self.regs[((offset & !0xC) >> 2) as usize & 4095]
+    }
+
     pub fn write(&mut self, offset: u32, value: u32) {
         let base = offset & !0xC;
         let slot = &mut self.regs[(base >> 2) as usize & 4095];

@@ -150,6 +150,23 @@ impl Rt1060 {
         }
     }
 
+    /// Current clock roots (Hz) derived from the CCM/CCM_ANALOG register
+    /// state firmware programmed. After `BOARD_BootClockRUN` the SwiftIO
+    /// Micro reports `core = 600 MHz`.
+    pub fn clocks(&self) -> crate::peripherals::clocks::Clocks {
+        self.bus.periph.clocks()
+    }
+
+    /// The core (CPU/AHB) clock in Hz.
+    pub fn core_hz(&self) -> u64 {
+        self.bus.periph.clock_hz().0
+    }
+
+    /// The PERCLK (GPT/PIT) clock in Hz.
+    pub fn perclk_hz(&self) -> u64 {
+        self.bus.periph.clock_hz().1
+    }
+
     /// The onboard RGB LED **on** states `(red, green, blue)`. The LED is
     /// active-low, so a channel is on when its GPIO1 pin is driven low (and
     /// configured as an output). See [`board`] for the wiring/sources.

@@ -23,6 +23,7 @@
 
 pub mod analog;
 pub mod ccm;
+pub mod clocks;
 pub mod gpio;
 pub mod gpt;
 pub mod lpuart;
@@ -158,6 +159,12 @@ pub struct Peripherals {
     /// Log first access to each unknown base (default true).
     pub log_unknown: bool,
     warned_unknown: std::collections::BTreeSet<u32>,
+    /// Cached clock roots (Hz), recomputed whenever CCM/CCM_ANALOG is written.
+    core_hz: u64,
+    perclk_hz: u64,
+    uart_hz: u64,
+    /// Fractional carry for the core→PERCLK cycle conversion in `tick`.
+    perclk_frac: u64,
 }
 
 impl Default for Peripherals {
@@ -168,7 +175,7 @@ impl Default for Peripherals {
 
 impl Peripherals {
     pub fn new() -> Self {
-        Self {
+        let mut p = Self {
             ccm: ccm::Ccm::new(),
             ccm_analog: analog::CcmAnalog::new(),
             iomuxc: RawRegs::new("iomuxc"),
@@ -193,7 +200,26 @@ impl Peripherals {
             unknown: RawRegs::new("unknown"),
             log_unknown: true,
             warned_unknown: std::collections::BTreeSet::new(),
-        }
+            core_hz: 1,
+            perclk_hz: 1,
+            uart_hz: 1,
+            perclk_frac: 0,
+        };
+        p.refresh_clocks();
+        p
+    }
+
+    /// Recompute the cached clock roots from the current CCM/CCM_ANALOG state.
+    fn refresh_clocks(&mut self) {
+        let c = clocks::Clocks::compute(&self.ccm, &self.ccm_analog);
+        self.core_hz = c.core.max(1);
+        self.perclk_hz = c.perclk.max(1);
+        self.uart_hz = c.uart.max(1);
+    }
+
+    /// The current clock roots (Hz).
+    pub fn clocks(&self) -> clocks::Clocks {
+        clocks::Clocks::compute(&self.ccm, &self.ccm_analog)
     }
 
     /// Route a read to the owning block. `base` is 16 KiB-aligned; `offset`
@@ -258,6 +284,10 @@ impl Peripherals {
                 self.unknown.write(off, value)
             }
         }
+        // A CCM / CCM_ANALOG write may have retuned the clock tree.
+        if b == base::CCM || b == base::CCM_ANALOG {
+            self.refresh_clocks();
+        }
     }
 
     #[cold]
@@ -267,11 +297,23 @@ impl Peripherals {
         }
     }
 
-    /// Advance every time-driven peripheral by `cycles` core cycles. The
-    /// bus core clock feeds the GPTs / PIT / watchdogs.
+    /// Advance every time-driven peripheral by `cycles` **core** cycles. The
+    /// GPTs and PIT run on PERCLK, so convert into the PERCLK domain with a
+    /// fractional carry to avoid drift when `perclk_hz` doesn't divide
+    /// `core_hz` evenly.
     pub fn tick(&mut self, cycles: u64) {
-        self.gpt[0].tick(cycles);
-        self.gpt[1].tick(cycles);
+        let total = self.perclk_frac + cycles.saturating_mul(self.perclk_hz);
+        let perclk_ticks = total / self.core_hz;
+        self.perclk_frac = total % self.core_hz;
+        if perclk_ticks != 0 {
+            self.gpt[0].tick(perclk_ticks);
+            self.gpt[1].tick(perclk_ticks);
+        }
+    }
+
+    /// The current cached clock roots (Hz): `(core, perclk, uart)`.
+    pub fn clock_hz(&self) -> (u64, u64, u64) {
+        (self.core_hz, self.perclk_hz, self.uart_hz)
     }
 
     /// Assemble the level-sensitive external interrupt lines.
