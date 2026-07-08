@@ -33,6 +33,7 @@ pub mod lpspi;
 pub mod lpuart;
 pub mod pit;
 pub mod pwm;
+pub mod qtmr;
 pub mod semc;
 pub mod src;
 pub mod wdog;
@@ -102,6 +103,10 @@ pub mod base {
     pub const PWM2: u32 = 0x403E_0000;
     pub const PWM3: u32 = 0x403E_4000;
     pub const PWM4: u32 = 0x403E_8000;
+    pub const TMR1: u32 = 0x401D_C000;
+    pub const TMR2: u32 = 0x401E_0000;
+    pub const TMR3: u32 = 0x401E_4000;
+    pub const TMR4: u32 = 0x401E_8000;
     pub const LPI2C1: u32 = 0x403F_0000;
     pub const LPI2C2: u32 = 0x403F_4000;
     pub const LPSPI1: u32 = 0x4039_4000;
@@ -149,6 +154,10 @@ pub mod irq {
     pub const GPT1: u32 = 100;
     pub const GPT2: u32 = 101;
     pub const PIT: u32 = 122;
+    pub const TMR1: u32 = 133;
+    pub const TMR2: u32 = 134;
+    pub const TMR3: u32 = 135;
+    pub const TMR4: u32 = 136;
 }
 
 // ---------------------------------------------------------------------------
@@ -178,6 +187,8 @@ pub struct Peripherals {
     pub adc: [adc::Adc; 2],
     /// FlexPWM1..4 (index 0 = PWM1).
     pub pwm: [pwm::Pwm; 4],
+    /// QTMR1..4 (index 0 = TMR1).
+    pub qtmr: [qtmr::Qtmr; 4],
     pub gpt: [gpt::Gpt; 2],
     pub wdog1: wdog::Wdog,
     pub wdog2: wdog::Wdog,
@@ -232,6 +243,7 @@ impl Peripherals {
             lpspi: [lpspi::LpSpi::new(1), lpspi::LpSpi::new(2)],
             adc: [adc::Adc::new(1), adc::Adc::new(2)],
             pwm: std::array::from_fn(|i| pwm::Pwm::new(i as u8 + 1)),
+            qtmr: std::array::from_fn(|i| qtmr::Qtmr::new(i as u8 + 1)),
             gpt: [gpt::Gpt::new(), gpt::Gpt::new()],
             wdog1: wdog::Wdog::new(wdog::Kind::Wdog),
             wdog2: wdog::Wdog::new(wdog::Kind::Wdog),
@@ -295,6 +307,10 @@ impl Peripherals {
             base::PWM2 => self.pwm[1].read32(off),
             base::PWM3 => self.pwm[2].read32(off),
             base::PWM4 => self.pwm[3].read32(off),
+            base::TMR1 => self.qtmr[0].read32(off),
+            base::TMR2 => self.qtmr[1].read32(off),
+            base::TMR3 => self.qtmr[2].read32(off),
+            base::TMR4 => self.qtmr[3].read32(off),
             base::GPT1 => self.gpt[0].read(off),
             base::GPT2 => self.gpt[1].read(off),
             base::WDOG1 => self.wdog1.read(off),
@@ -337,6 +353,10 @@ impl Peripherals {
             base::PWM2 => self.pwm[1].write32(off, value),
             base::PWM3 => self.pwm[2].write32(off, value),
             base::PWM4 => self.pwm[3].write32(off, value),
+            base::TMR1 => self.qtmr[0].write32(off, value),
+            base::TMR2 => self.qtmr[1].write32(off, value),
+            base::TMR3 => self.qtmr[2].write32(off, value),
+            base::TMR4 => self.qtmr[3].write32(off, value),
             base::GPT1 => self.gpt[0].write(off, value),
             base::GPT2 => self.gpt[1].write(off, value),
             base::WDOG1 => self.wdog1.write(off, value),
@@ -374,12 +394,26 @@ impl Peripherals {
         }
     }
 
+    /// Index of the QTMR instance for a base, if it is one.
+    #[inline]
+    fn qtmr_index(base: u32) -> Option<usize> {
+        match base {
+            base::TMR1 => Some(0),
+            base::TMR2 => Some(1),
+            base::TMR3 => Some(2),
+            base::TMR4 => Some(3),
+            _ => None,
+        }
+    }
+
     pub fn read8(&mut self, addr: u32) -> u8 {
         let (b, off) = (addr & !0x3FFF, addr & 0x3FFF);
         if b == base::DMA0 {
             self.edma.read8(off)
         } else if let Some(i) = Self::pwm_index(b) {
             self.pwm[i].read8(off)
+        } else if let Some(i) = Self::qtmr_index(b) {
+            self.qtmr[i].read8(off)
         } else {
             (self.read(addr & !0x3) >> ((addr & 0x3) * 8)) as u8
         }
@@ -391,6 +425,8 @@ impl Peripherals {
             self.edma.read16(off)
         } else if let Some(i) = Self::pwm_index(b) {
             self.pwm[i].read16(off)
+        } else if let Some(i) = Self::qtmr_index(b) {
+            self.qtmr[i].read16(off)
         } else {
             (self.read(addr & !0x3) >> ((addr & 0x2) * 8)) as u16
         }
@@ -402,6 +438,8 @@ impl Peripherals {
             self.edma.write8(off, value);
         } else if let Some(i) = Self::pwm_index(b) {
             self.pwm[i].write8(off, value);
+        } else if let Some(i) = Self::qtmr_index(b) {
+            self.qtmr[i].write8(off, value);
         } else {
             let v = u32::from(value);
             self.write(addr & !0x3, v << 24 | v << 16 | v << 8 | v);
@@ -414,6 +452,8 @@ impl Peripherals {
             self.edma.write16(off, value);
         } else if let Some(i) = Self::pwm_index(b) {
             self.pwm[i].write16(off, value);
+        } else if let Some(i) = Self::qtmr_index(b) {
+            self.qtmr[i].write16(off, value);
         } else {
             let v = u32::from(value);
             self.write(addr & !0x3, v << 16 | v);
@@ -456,6 +496,9 @@ impl Peripherals {
             g.tick(t);
         }
         self.pit.tick(perclk_ticks);
+        for t in &mut self.qtmr {
+            t.tick(perclk_ticks);
+        }
     }
 
     /// The current cached clock roots (Hz): `(core, perclk, uart)`.
@@ -512,6 +555,11 @@ impl Peripherals {
         }
         if self.pit.irq_pending() {
             m.set(irq::PIT);
+        }
+        for (i, t) in self.qtmr.iter().enumerate() {
+            if t.irq_pending() {
+                m.set(irq::TMR1 + i as u32); // TMR1..4 = IRQ 133..136
+            }
         }
         if self.lpi2c[0].irq_pending() {
             m.set(irq::LPI2C1);
