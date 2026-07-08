@@ -14,6 +14,10 @@
 
 const CR_EN: u32 = 1 << 0;
 const CR_ENMOD: u32 = 1 << 1;
+/// CR.CLKSRC (bits [8:6], RM §45.5.1): 0 = off, 1 = ipg PERCLK, 4 = low-freq
+/// 32.768 kHz, 5 = 24 MHz crystal; 2/3 (high-freq/external) approximated as
+/// PERCLK for now.
+const CR_CLKSRC_SHIFT: u32 = 6;
 
 pub struct Gpt {
     cr: u32,
@@ -74,9 +78,16 @@ impl Gpt {
         }
     }
 
-    /// Advance the counter by `cycles` source clocks through the prescaler.
+    /// CR.CLKSRC — which clock source drives the counter (0 = stopped).
+    pub fn clksrc(&self) -> u32 {
+        (self.cr >> CR_CLKSRC_SHIFT) & 0x7
+    }
+
+    /// Advance the counter by `cycles` **source** clocks through the
+    /// prescaler. `cycles` is already in the domain selected by `clksrc`
+    /// (the aggregate converts core cycles to the right frequency).
     pub fn tick(&mut self, cycles: u64) {
-        if self.cr & CR_EN == 0 {
+        if self.cr & CR_EN == 0 || self.clksrc() == 0 {
             return;
         }
         let div = self.pr + 1; // PR is "divide by PR+1"
@@ -119,7 +130,7 @@ mod tests {
         let mut g = Gpt::new();
         g.write(0x10, 10); // OCR1 = 10
         g.write(0x0C, 1 << 0); // IR: OF1 enable
-        g.write(0x00, CR_EN); // CR: EN, PR=0 (div 1)
+        g.write(0x00, CR_EN | (1 << 6)); // EN, CLKSRC=perclk, PR=0
         g.tick(9);
         assert_eq!(g.read(0x24), 9);
         assert!(!g.irq_pending());
@@ -134,7 +145,7 @@ mod tests {
     fn prescaler_divides() {
         let mut g = Gpt::new();
         g.write(0x04, 3); // PR=3 -> divide by 4
-        g.write(0x00, CR_EN);
+        g.write(0x00, CR_EN | (1 << 6));
         g.tick(4);
         assert_eq!(g.read(0x24), 1);
         g.tick(12);

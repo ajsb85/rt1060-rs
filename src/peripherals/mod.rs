@@ -164,8 +164,9 @@ pub struct Peripherals {
     core_hz: u64,
     perclk_hz: u64,
     uart_hz: u64,
-    /// Fractional carry for the core→PERCLK cycle conversion in `tick`.
-    perclk_frac: u64,
+    /// Fractional carry for the core→domain cycle conversion in `tick`,
+    /// one per clock domain: [0] PERCLK, [1] 24 MHz OSC, [2] 32.768 kHz LF.
+    dom_frac: [u64; 3],
 }
 
 impl Default for Peripherals {
@@ -204,7 +205,7 @@ impl Peripherals {
             core_hz: 1,
             perclk_hz: 1,
             uart_hz: 1,
-            perclk_frac: 0,
+            dom_frac: [0; 3],
         };
         p.refresh_clocks();
         p
@@ -303,14 +304,30 @@ impl Peripherals {
     /// fractional carry to avoid drift when `perclk_hz` doesn't divide
     /// `core_hz` evenly.
     pub fn tick(&mut self, cycles: u64) {
-        let total = self.perclk_frac + cycles.saturating_mul(self.perclk_hz);
-        let perclk_ticks = total / self.core_hz;
-        self.perclk_frac = total % self.core_hz;
-        if perclk_ticks != 0 {
-            self.gpt[0].tick(perclk_ticks);
-            self.gpt[1].tick(perclk_ticks);
-            self.pit.tick(perclk_ticks);
+        // Convert `cycles` core cycles into each clock domain, carrying the
+        // remainder in `dom_frac` so no ticks are lost to integer division.
+        let core = self.core_hz;
+        let domain = |freq: u64, frac: &mut u64| -> u64 {
+            let total = *frac + cycles.saturating_mul(freq);
+            let ticks = total / core;
+            *frac = total % core;
+            ticks
+        };
+        let [f0, f1, f2] = &mut self.dom_frac;
+        let perclk_ticks = domain(self.perclk_hz, f0);
+        let osc_ticks = domain(clocks::OSC24M, f1);
+        let lf_ticks = domain(32_768, f2);
+        // Each GPT counts in the domain its CR.CLKSRC selects.
+        for g in &mut self.gpt {
+            let t = match g.clksrc() {
+                0 => 0,
+                5 => osc_ticks,    // 24 MHz crystal
+                4 => lf_ticks,     // 32.768 kHz low-freq
+                _ => perclk_ticks, // 1 = PERCLK (2/3 approximated as PERCLK)
+            };
+            g.tick(t);
         }
+        self.pit.tick(perclk_ticks);
     }
 
     /// The current cached clock roots (Hz): `(core, perclk, uart)`.

@@ -87,6 +87,34 @@ fn swiftio_600mhz_clock_config_reads_back() {
 }
 
 #[test]
+fn gpt_counts_in_the_perclk_domain() {
+    const GPT1: u32 = 0x401E_C000;
+    let mut soc = Rt1060::new();
+    soc.quiet();
+    // 600 MHz core, 24 MHz PERCLK (25:1 ratio).
+    soc.bus.write32(CCM_ANALOG, 100 | (1 << 13));
+    soc.bus.write32(CCM + 0x10, 1); // ARM_PODF
+    soc.bus.write32(CCM + 0x18, 3 << 18); // PRE_PERIPH = PLL1
+    soc.bus.write32(CCM + 0x1C, 1 << 6); // PERCLK from OSC 24 MHz
+    assert_eq!(soc.core_hz(), 600_000_000);
+    assert_eq!(soc.perclk_hz(), 24_000_000);
+    // GPT1: CR.CLKSRC = 1 (PERCLK), EN. PR = 0 (÷1).
+    soc.bus.write32(GPT1, (1 << 6) | 1);
+    // 600 core cycles → 600 * 24/600 = 24 PERCLK ticks → CNT = 24.
+    soc.bus.periph.tick(600);
+    assert_eq!(
+        soc.bus.read32(GPT1 + 0x24),
+        24,
+        "GPT ran at PERCLK, not core"
+    );
+    // A GPT with CLKSRC = 0 (stopped) does not count.
+    const GPT2: u32 = 0x401F_0000;
+    soc.bus.write32(GPT2, 1); // EN but CLKSRC = 0
+    soc.bus.periph.tick(600);
+    assert_eq!(soc.bus.read32(GPT2 + 0x24), 0, "no clock source = stopped");
+}
+
+#[test]
 fn rgb_led_red_turns_on_active_low() {
     let mut soc = Rt1060::new();
     soc.quiet();
