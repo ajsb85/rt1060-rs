@@ -39,7 +39,7 @@ Milestone tracking lives in [`ROADMAP.md`](ROADMAP.md). Snapshot:
 | PIT, GPT (clock-domain accurate) | ✅ |
 | eDMA (32-ch TCD through the bus) + DMAMUX hw requests, LPI2C, LPSPI, ADC | ✅ + device hooks |
 | FlexPWM (`pwm_duty()`) + QTMR (PERCLK counting) | ✅ |
-| USDHC + attachable **SD card** (init + block read/write) | ✅ |
+| USDHC + attachable **SD card** — real Zephyr driver inits it (reset, CMD0-CMD7 ident, CMD6 switches) + **mounts FAT** | ✅ |
 | USB OTG register block (init runs; full CDC enumeration ⬜) | ✅ |
 | FlexCAN (message buffers + loopback), SAI/I²S | ✅ |
 | FlexSPI IP command engine (program/read/erase + JEDEC ID vs backed NOR) | ✅ |
