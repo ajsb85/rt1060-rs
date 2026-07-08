@@ -10,6 +10,7 @@
 use crate::cortex_m::{BreakCause, CortexM7};
 use crate::loader::LoadedImage;
 use crate::memory::SystemBus;
+use crate::peripherals::clocks;
 
 /// MadMachine SwiftIO Micro board constants.
 ///
@@ -120,6 +121,11 @@ pub struct Rt1060 {
     pub bus: SystemBus,
     /// Retired-cycle accumulator, for wall-clock ↔ core-cycle conversions.
     pub cycles: u64,
+    /// Fractional carry for converting retired core cycles into ticks of the
+    /// SysTick **external** reference clock (100 kHz on the RT1062, see
+    /// [`clocks::SYSTICK_EXT_HZ`]). Only used while SysTick selects the
+    /// external clock (`CSR.CLKSOURCE == 0`), as the Teensyduino core does.
+    systick_ext_frac: u64,
 }
 
 impl Default for Rt1060 {
@@ -136,6 +142,7 @@ impl Rt1060 {
             core: CortexM7::new(),
             bus: SystemBus::new(),
             cycles: 0,
+            systick_ext_frac: 0,
         }
     }
 
@@ -188,6 +195,35 @@ impl Rt1060 {
         Ok(load_address)
     }
 
+    /// Cold-boot like the i.MX RT Boot ROM handing off to an Image Vector
+    /// Table (IVT). Firmware that boots from FlexSPI NOR — the PJRC Teensyduino
+    /// core, NXP XIP SDK images — places a FlexSPI configuration block at
+    /// `0x6000_0000` and an IVT at `0x6000_1000` (RM §9.7.1, tag `0xD1` in the
+    /// header byte) whose second word is the entry point. The ROM validates
+    /// the config, reads `IVT.entry`, and branches there with a scratch SP in
+    /// OCRAM — the Teensyduino `ResetHandler` is `naked` and sets its own SP
+    /// (`mov sp, _estack`) before the first stacking operation. Load the image,
+    /// then enter the IVT's reset handler.
+    pub fn cold_boot_from_ivt(image: &LoadedImage) -> Result<Self, String> {
+        let mut soc = Self::new();
+        soc.bus.load_segments(image);
+        // RT SDK / Teensy link scripts set the ELF `e_entry` to the IVT; fall
+        // back to the architectural FlexSPI-NOR IVT offset if absent.
+        let ivt = image.entry.unwrap_or(0x6000_1000);
+        let header = soc.bus.read32(ivt);
+        if header & 0xFF != 0xD1 {
+            return Err(format!(
+                "no IVT at {ivt:#010x}: header {header:#010x} lacks the 0xD1 tag"
+            ));
+        }
+        let entry = soc.bus.read32(ivt + 4);
+        // The ROM leaves a valid SP in OCRAM; the ResetHandler overwrites it.
+        soc.core.regs[13] = 0x2028_0000;
+        soc.core.regs[15] = entry & !1;
+        soc.core.vtor = 0x0000_0000;
+        Ok(soc)
+    }
+
     /// Silence unmapped/unknown-peripheral logging and any `RT1060_TRACE`
     /// output (tests, benchmarks).
     pub fn quiet(&mut self) {
@@ -205,6 +241,7 @@ impl Rt1060 {
         let elapsed = self.core.cycles.wrapping_sub(before);
         self.cycles = self.cycles.wrapping_add(elapsed);
         self.bus.periph.tick(elapsed);
+        self.tick_systick_external(elapsed);
         // Service DMA channels driven by peripheral hardware requests
         // (cheap-gated: a no-op unless some channel has ERQ enabled).
         self.bus.edma_service_hw();
@@ -212,6 +249,32 @@ impl Rt1060 {
         // Software-requested resets (SRC.SCR, SCB AIRCR.SYSRESETREQ).
         if self.core.sysreset_request || self.bus.periph.src.reset_requested {
             self.chip_reset();
+        }
+    }
+
+    /// Drive SysTick from its **external** reference clock when firmware
+    /// selects it (`SYST_CSR.CLKSOURCE == 0`). The Cortex-M7 core ticks
+    /// SysTick once per instruction for the *processor* clock (`CLKSOURCE == 1`,
+    /// what Zephyr / the NXP SDK use); the external source is a SoC concern
+    /// because its rate is fixed in wall-clock time, not core cycles.
+    ///
+    /// On the i.MX RT1062 the SysTick external clock is the 24 MHz XTALOSC
+    /// through an undocumented divide-by-240 = **100 kHz** — NXP RT1052 RM rev 1
+    /// §"SYSTICK", relied on by the Teensyduino core (`startup.c`
+    /// `SYSTICK_EXT_FREQ 100000`) so `delay()`/`millis()` stay correct across
+    /// ARM-clock changes. Convert retired core cycles into 100 kHz ticks with a
+    /// fractional carry so no ticks are lost to integer division.
+    fn tick_systick_external(&mut self, cycles: u64) {
+        // ENABLE set (bit0) and CLKSOURCE clear (bit2) selects external.
+        if self.core.syst_csr & 0b101 != 0b001 {
+            return;
+        }
+        let core = self.core_hz().max(1);
+        let total = self.systick_ext_frac + cycles.saturating_mul(clocks::SYSTICK_EXT_HZ);
+        let ticks = total / core;
+        self.systick_ext_frac = total % core;
+        if ticks != 0 {
+            self.core.systick_advance(ticks.min(u32::MAX as u64) as u32);
         }
     }
 
@@ -236,6 +299,7 @@ impl Rt1060 {
         self.core.vtor = vtor;
         self.bus.periph.src.reset_requested = false;
         self.bus.periph.src.set_reset_cause(SRSR_POR);
+        self.systick_ext_frac = 0;
         self.core.reset(&mut self.bus);
     }
 

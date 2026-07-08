@@ -51,8 +51,9 @@ Milestone tracking lives in [`ROADMAP.md`](ROADMAP.md). Snapshot:
 | **Emulates `mm download` end-to-end** — boots the real `SerialLoader` bootloader, programs a real `micro.img` to the NOR `user` partition over the serial protocol, then **two-stage boots** it: `cold_boot_from_flash` models the Boot ROM (NOR → parse header → SDRAM → run the Zephyr app) | ✅ |
 | **GDB remote stub** + `RT1060_TRACE` logging + criterion benches | ✅ |
 | SwiftIO 44-pin map (id→GPIO, from HAL static analysis) via `swiftio_pin()` | ✅ |
+| **HIL parity vs a physical Teensy 4.1** (same MIMXRT1062) — boots PJRC's unmodified Arduino blinky via the i.MX RT Boot ROM → IVT path (`cold_boot_from_ivt`) and reproduces the **exact LED cadence** (SysTick 100 kHz external clock); cross-checked against the board flashed with the same `.hex` | ✅ |
 | USB CDC enumeration, SEMC real command decode, ENET | ⬜ ROADMAP |
-| MadMachine two-stage bootloader (eboot); WASM front-end; HIL parity | ⬜ ROADMAP |
+| MadMachine two-stage bootloader (eboot); WASM front-end; SwiftIO USB-serial HIL | ⬜ ROADMAP |
 
 ## Quick start
 

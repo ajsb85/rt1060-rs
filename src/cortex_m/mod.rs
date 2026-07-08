@@ -909,8 +909,11 @@ impl CortexM7 {
         if let Some(exc_ret) = self.exc_return_pending.take() {
             self.exception_return(bus, exc_ret);
         }
-        // SysTick: one tick per instruction (cycle model is 1 IPC).
-        if self.syst_csr & 0x1 != 0 {
+        // SysTick, processor-clock source (CSR.CLKSOURCE==1): one tick per
+        // instruction (cycle model is 1 IPC). The external reference source
+        // (CLKSOURCE==0) is fixed in wall-clock time, so the SoC drives it from
+        // retired cycles instead (`Rt1060::tick_systick_external`).
+        if self.syst_csr & 0b101 == 0b101 {
             if self.syst_cvr == 0 {
                 self.syst_cvr = self.syst_rvr & 0x00ff_ffff;
             } else {

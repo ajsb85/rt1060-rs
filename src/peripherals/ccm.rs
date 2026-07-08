@@ -26,6 +26,13 @@ impl Ccm {
         for off in (0x68..=0x80).step_by(4) {
             regs[off >> 2] = 0xFFFF_FFFF;
         }
+        // CBCMR (0x18) reset value 0x2DAE8324 (SVD MIMXRT1062 CCM.CBCMR). Key
+        // field: PRE_PERIPH_CLK_SEL[19:18] = 3 = PLL_ARM. Firmware that runs
+        // the ARM PLL — the Teensyduino `set_arm_clock` and MCUXpresso
+        // `CLOCK_SetMux` alike — only rewrites PERIPH_CLK2/FLEXSPI2 selects and
+        // relies on this reset default for the pre-periph source, so without it
+        // the core clock resolves to PLL2 (528 MHz) instead of PLL_ARM.
+        regs[0x18 >> 2] = 0x2DAE_8324;
         // CSR (0x08): Cn oscillator ready-ish; leave 0 (spin-loops read
         // CCM_ANALOG_MISC0 for XTAL ready, not CCM.CSR, on RT1060).
         Ccm { regs }

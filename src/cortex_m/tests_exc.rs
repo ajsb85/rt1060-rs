@@ -134,7 +134,7 @@ fn systick_counts_down_and_fires() {
     let (mut cpu, mut bus) = setup_exc(&[nop(); 32]);
     cpu.syst_rvr = 5;
     cpu.syst_cvr = 5;
-    cpu.syst_csr = 0b011; // ENABLE | TICKINT
+    cpu.syst_csr = 0b111; // ENABLE | TICKINT | CLKSOURCE (processor clock)
     let mut fired_at = None;
     for i in 0..12 {
         cpu.step(&mut bus);

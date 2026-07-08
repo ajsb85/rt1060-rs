@@ -20,6 +20,11 @@ use super::ccm::Ccm;
 
 /// 24 MHz crystal oscillator — the root of the whole tree.
 pub const OSC24M: u64 = 24_000_000;
+/// SysTick external reference clock: the 24 MHz XTALOSC through an
+/// undocumented divide-by-240 (NXP RT1052 RM rev 1, §SYSTICK) = 100 kHz. The
+/// Teensyduino core (`startup.c`, `SYSTICK_EXT_FREQ`) runs SysTick from this
+/// so `delay()`/`millis()` stay correct independent of the ARM clock.
+pub const SYSTICK_EXT_HZ: u64 = OSC24M / 240;
 /// Nominal SYS PLL (PLL2) output.
 pub const PLL_SYS: u64 = 528_000_000;
 /// Nominal USB1 PLL (PLL3) output; the LPUART default root is PLL3/6.

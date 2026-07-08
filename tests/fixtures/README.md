@@ -170,3 +170,39 @@ header (`image.py`: CRC, offset, size, load address `0x8000_0000`, SHA-256) plus
 the raw SDRAM payload. `tests/mm_download.rs` programs it to the NOR `user`
 partition over the `mm download` partition protocol, then two-stage boots it
 (read from NOR → parse header → load to SDRAM → run) into the Zephyr app.
+
+### `teensy41_blink_fast.elf` / `teensy41_blink_fast.hex`
+
+**HIL parity fixture** — PJRC's own unmodified `blink_fast` example built for
+the **Teensy 4.1** (from `https://www.pjrc.com/teensy/blink_both.zip`,
+`blink_fast_Teensy41.{elf,hex}`, copied verbatim). The Teensy 4.1 is the same
+NXP **MIMXRT1062** silicon as the SwiftIO Micro, so it cross-checks the emulated
+CPU + clock + GPIO against real hardware with a completely independent firmware
+stack (the Arduino/Teensyduino core, not MadMachine/Zephyr).
+
+The Arduino sketch is `pinMode(13, OUTPUT)` then toggle pin 13 with
+`delay(100)`. It boots via the i.MX RT **Boot ROM → IVT** path
+(`Rt1060::cold_boot_from_ivt`): a FlexSPI config block at `0x6000_0000`, an IVT
+at `0x6000_1000` whose entry is the `naked` `ResetHandler` (`0x6000_1030`) that
+reconfigures FlexRAM, copies `.text.itcm` into ITCM, runs the clock tree to
+F_CPU, and reaches the Arduino runtime. Pin 13 = pad `GPIO_B0_03`, remapped by
+the core to the high-speed **GPIO7** bit 3 (`IOMUXC_GPR_GPR27`).
+
+`tests/teensy_hil.rs`:
+
+- boots with **zero unimplemented instructions**, runs from ITCM, and resolves
+  **`core_hz` = 396 MHz** — the exact frequency this build programs (`PLL_ARM`
+  `DIV_SELECT = 66` → VCO 792 MHz ÷ 2 ÷ `ARM_PODF` 2). This surfaced a clock
+  bug: the emulator wasn't seeding CCM `CBCMR` to its reset value, so
+  `PRE_PERIPH_CLK_SEL` (which the firmware leaves at the PLL_ARM reset default)
+  resolved to PLL2 = 528 MHz instead of the ARM PLL (fast test);
+- run long, pin 13 toggles at the **exact hardware cadence**: a first toggle at
+  ~300 ms (Teensyduino `TEENSY_INIT_USB_DELAY`), then every 100 ms
+  (`delay(100)`), timed by SysTick off its 100 kHz external reference clock —
+  the `--ignored` deep test.
+
+**Cross-check against the physical board:** flash the identical `.hex` with
+`teensy_loader_cli --mcu=TEENSY41 teensy41_blink_fast.hex` (tools installed at
+`/opt/teensy-tools`, udev rules from `pjrc.com/teensy/00-teensy.rules`) and the
+onboard LED blinks at 5 Hz — the same cadence the emulator reproduces from the
+same build.

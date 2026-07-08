@@ -153,9 +153,23 @@ use). Frequency math and the full pin table remain.
       the payload to SDRAM, reset into it (the SoC boots the deployed image, not
       the harness). The SerialLoader's own `EXECUTE`/boot path is blocked (rejects
       an SDRAM target `0xff`; the SDK ships no `eboot` first-stage binary)
-- [ ] FS download tags (`FS_*`); HIL parity vs a physical Teensy 4.1 / SwiftIO
-      (same MIMXRT1062 silicon) — cross-check emulated CPU/peripherals
-- [ ] HIL parity: compare against a physical SwiftIO Micro over USB-serial
+- [x] **FS_FILE download tags** — `mm copy` a file to the on-board littlefs
+      (`fs_file_begin(path)`/`data`/`end`); the bootloader writes it to `/lfs` on
+      the NOR and the content lands in the littlefs partition (`tests/mm_download.rs`)
+- [x] **HIL parity vs a physical Teensy 4.1** (same MIMXRT1062 silicon) — boot
+      PJRC's unmodified Arduino `blink_fast_Teensy41` (a completely independent
+      firmware stack: Teensyduino core, not MadMachine/Zephyr) through the i.MX
+      RT **Boot ROM → IVT** path (`Rt1060::cold_boot_from_ivt`), with **zero
+      unimplemented instructions**, and reproduce the **exact hardware LED
+      cadence** — `delay(100)` timed by SysTick off its 100 kHz external
+      reference clock. Cross-checked against the physical board flashed with the
+      identical `.hex` via `teensy_loader_cli`. Surfaced + fixed two parity
+      bugs: SysTick ignored `CSR.CLKSOURCE` (external-clock timing), and CCM
+      `CBCMR` wasn't seeded to its reset value (core clock mis-resolved to PLL2
+      528 MHz instead of the ARM PLL 396 MHz). `tests/teensy_hil.rs`,
+      `examples/teensy.rs`
+- [ ] HIL parity: compare against a physical SwiftIO Micro over USB-serial;
+      SwiftIO `11WiFi` (SPI+ESP32)
 
 ## M9 — Tooling ⏳
 
