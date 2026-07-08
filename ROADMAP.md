@@ -148,8 +148,13 @@ use). Frequency math and the full pin table remain.
       `micro.img` to the NOR `user` partition (`PART_BEGIN/DATA/END/SETBOOT`),
       then read it back from NOR, parse the header, load the payload to SDRAM
       and boot it into the Zephyr app (`tests/mm_download.rs`)
-- [ ] FS download tags (`FS_*`); run the SerialLoader's own two-stage boot path
-      (rather than the harness reading NOR → SDRAM)
+- [x] **In-emulator two-stage boot** — `Rt1060::cold_boot_from_flash` models the
+      Boot ROM / first-stage loader: read the flashed `micro.img` from NOR, stage
+      the payload to SDRAM, reset into it (the SoC boots the deployed image, not
+      the harness). The SerialLoader's own `EXECUTE`/boot path is blocked (rejects
+      an SDRAM target `0xff`; the SDK ships no `eboot` first-stage binary)
+- [ ] FS download tags (`FS_*`); HIL parity vs a physical Teensy 4.1 / SwiftIO
+      (same MIMXRT1062 silicon) — cross-check emulated CPU/peripherals
 - [ ] HIL parity: compare against a physical SwiftIO Micro over USB-serial
 
 ## M9 — Tooling ⏳
