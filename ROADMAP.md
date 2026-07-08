@@ -80,9 +80,10 @@ use). Frequency math and the full pin table remain.
       board `../zephyr/boards/arm/mm_feather/{mm_feather.dts,pinmux.c}`
       (RGB LED, console LPUART1, I²C1/3, LPSPI3/4, SD/USDHC1 + card-detect,
       SAI1/I²S, FlexPWM/GPT/ADC/USB1) → `board::pinmux`
-- [ ] SwiftIO *logical* id `D0..D43` → pad ordering: only in the prebuilt
-      HalSwiftIO `swifthal_gpio_open` driver + the SwiftIOPinout image; a thin
-      translation layer over the (now-mapped) hardware pins — do not guess
+- [x] SwiftIO *logical* id 0..47 (`D0..D43` + RGB/DL) → `(GPIO, pin)`:
+      **recovered by static analysis** of the HalSwiftIO `gpio_pin_maps` table
+      (`swift_gpio.c.obj` in `libapp.a`) and cross-validated against the
+      devicetree → `board::SWIFTIO_PIN_MAP`, `Rt1060::swiftio_pin(id)`
 - [ ] SEMC real command decode / SDRAM refresh timing (beyond status)
 
 ## M6 — DMA & serial/analog peripherals ⏳

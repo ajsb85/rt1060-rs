@@ -21,10 +21,10 @@ use crate::memory::SystemBus;
 /// are MadMachine's Zephyr board `mm_feather` (the Micro's internal name):
 /// `../zephyr/boards/arm/mm_feather/{mm_feather.dts,pinmux.c}`. The concrete
 /// pads below are transcribed from there (see [`board::pinmux`]). The SwiftIO
-/// *logical* id (`D0`..`D43`, MadBoards `SwiftIOMicro`) → pad ordering is
-/// resolved inside the prebuilt HalSwiftIO `swifthal_gpio_open(id)` driver
-/// (`.a`) plus the `SwiftIOPinout` image — that thin translation layer is not
-/// in machine-readable source form; do not guess it (ROADMAP).
+/// *logical* id (`D0`..`D43` + `RED`/`GREEN`/`BLUE`/`DL`, ids 0..47) →
+/// (GPIO controller, pin) is [`board::SWIFTIO_PIN_MAP`], recovered by static
+/// analysis of the prebuilt HalSwiftIO driver and cross-checked against the
+/// devicetree — see that constant.
 pub mod board {
     /// Core clock the SwiftIO Micro configures (600 MHz ARM PLL).
     pub const CORE_CLOCK_HZ: u64 = 600_000_000;
@@ -52,6 +52,39 @@ pub mod board {
     pub const RGB_RED_PIN: u8 = 9;
     pub const RGB_GREEN_PIN: u8 = 10;
     pub const RGB_BLUE_PIN: u8 = 11;
+
+    /// SwiftIO Micro logical pin id (0..=47) → `(GPIO controller 1-based, pin)`.
+    ///
+    /// **Recovered by static analysis** of the prebuilt HalSwiftIO driver: the
+    /// `gpio_pin_maps` table in `swift_gpio.c.obj` (inside
+    /// `../mm-sdk/boards/SwiftIOMicro/lib/thumbv7em/nofp/whole/libapp.a`) is 48
+    /// entries of `{const char *device, u32 pin}`; `swifthal_gpio_open(id)`
+    /// (`cmp id,#47`) indexes it. The device pointers relocate to the
+    /// `"GPIO_1\0GPIO_2\0"` blob — addend 0 = `GPIO_1` (GPIO1), addend 7 =
+    /// `GPIO_2` (GPIO2). Cross-validated against the mm_feather devicetree:
+    /// id 44 (RED) = `(1, 9)` = `GPIO1_IO09`, matching `red_led = &gpio1 9`.
+    ///
+    /// Index = SwiftIO id (`D0`..`D43` = 0..43, `RED`=44, `GREEN`=45,
+    /// `BLUE`=46, `DL`=47).
+    #[rustfmt::skip]
+    pub const SWIFTIO_PIN_MAP: [(u8, u8); 48] = [
+        // D0..D13 → GPIO1
+        (1, 20), (1, 24), (1, 25), (1, 26), (1, 27), (1, 28), (1, 31),
+        (1, 30), (1, 29), (1, 19), (1, 18), (1, 21), (1, 14), (1, 15),
+        // D14..D43 → GPIO2
+        (2, 1), (2, 2), (2, 3), (2, 30), (2, 31), (2, 16), (2, 17), (2, 18),
+        (2, 19), (2, 0), (2, 20), (2, 21), (2, 22), (2, 23), (2, 24), (2, 25),
+        (2, 26), (2, 27), (2, 4), (2, 5), (2, 6), (2, 7), (2, 8), (2, 9),
+        (2, 10), (2, 11), (2, 12), (2, 13), (2, 14), (2, 15),
+        // RED, GREEN, BLUE, DL → GPIO1
+        (1, 9), (1, 10), (1, 11), (1, 1),
+    ];
+
+    /// `(GPIO controller 1-based, pin)` a SwiftIO logical id drives, or `None`
+    /// for an out-of-range id.
+    pub fn swiftio_gpio(id: u8) -> Option<(u8, u8)> {
+        SWIFTIO_PIN_MAP.get(id as usize).copied()
+    }
 
     /// Concrete pad / GPIO assignments transcribed from the SwiftIO Micro
     /// Zephyr board `mm_feather` (`pinmux.c` + `mm_feather.dts`). These are the
@@ -230,6 +263,15 @@ impl Rt1060 {
         self.bus.periph.pwm.get(i)?.duty(submodule, chan)
     }
 
+    /// Output level a SwiftIO logical pin id (`D0`..`D43`, RGB LED 44..46, DL
+    /// 47) is driving, or `None` if the id is out of range. Resolves the id to
+    /// its GPIO controller/pin via [`board::SWIFTIO_PIN_MAP`]. Only meaningful
+    /// when the pin is configured as an output.
+    pub fn swiftio_pin(&self, id: u8) -> Option<bool> {
+        let (gpio, pin) = board::swiftio_gpio(id)?;
+        Some(self.bus.periph.gpio[(gpio - 1) as usize].output(pin))
+    }
+
     /// The onboard RGB LED **on** states `(red, green, blue)`. The LED is
     /// active-low, so a channel is on when its GPIO1 pin is driven low (and
     /// configured as an output). See [`board`] for the wiring/sources.
@@ -299,6 +341,34 @@ mod tests {
         assert_ne!(soc.bus.read32(0x4018_4014) & (1 << 21), 0);
         assert_eq!(soc.bus.read32(0x4018_401C), u32::from(b'h'));
         assert_eq!(soc.bus.read32(0x4018_401C), u32::from(b'i'));
+    }
+
+    #[test]
+    fn swiftio_pin_map_matches_led_and_dts() {
+        // The extracted map must agree with the RGB LED constants (which come
+        // from the mm_feather devicetree) — the cross-validation of the static
+        // analysis.
+        assert_eq!(board::swiftio_gpio(44), Some((1, 9)), "RED = GPIO1_IO09");
+        assert_eq!(board::swiftio_gpio(45), Some((1, 10)), "GREEN = GPIO1_IO10");
+        assert_eq!(board::swiftio_gpio(46), Some((1, 11)), "BLUE = GPIO1_IO11");
+        assert_eq!(board::swiftio_gpio(0), Some((1, 20)), "D0 = GPIO1_IO20");
+        assert_eq!(board::swiftio_gpio(14), Some((2, 1)), "D14 = GPIO2_IO01");
+        assert_eq!(board::swiftio_gpio(43), Some((2, 15)), "D43 = GPIO2_IO15");
+        assert_eq!(board::swiftio_gpio(48), None, "out of range");
+        assert_eq!(board::SWIFTIO_PIN_MAP.len(), 48);
+    }
+
+    #[test]
+    fn swiftio_pin_reads_gpio_output() {
+        let img = boot_image(&[b(-2)]); // spin
+        let mut soc = Rt1060::boot(&img);
+        soc.quiet();
+        // Drive D0 (GPIO1 pin 20) high through the bus.
+        const GPIO1: u32 = 0x401B_8000;
+        soc.bus.write32(GPIO1 + 0x04, 1 << 20); // GDIR output
+        soc.bus.write32(GPIO1 + 0x84, 1 << 20); // DR_SET
+        assert_eq!(soc.swiftio_pin(0), Some(true), "D0 driven high");
+        assert_eq!(soc.swiftio_pin(1), Some(false), "D1 (GPIO1 pin 24) low");
     }
 
     #[test]
