@@ -139,9 +139,13 @@ use). Frequency math and the full pin table remain.
 - [x] **Boot the MadMachine `SerialLoader` recovery bootloader** (loads to ITCM,
       brings up the full Zephyr stack + littlefs, logs "Recovery base Zephyr!") —
       the prerequisite for emulating `mm download`
-- [ ] `mm download` over the framed serial protocol (SYNC/RAM/FLASH/VERIFY/
-      EXECUTE tags, 115200) to the running bootloader — needs the transport wired
-      (UART, or a USB-CDC device stack) and the download flow driven
+- [x] **`mm download` over the framed serial protocol** — drive the real
+      SerialLoader bootloader's download protocol (`PREAMBLE | tag | length |
+      payload | crc32`) over LPUART1: SYNC + a RAM download lands its bytes in
+      SDRAM, verified (`tests/mm_download.rs`, `examples/mm_download.rs`). No USB
+      stack needed — the bootloader accepts the download over UART
+- [ ] FLASH/PARTITION/FS download tags (program a real `micro.img` to NOR via
+      the bootloader, then two-stage boot it)
 - [ ] HIL parity: compare against a physical SwiftIO Micro over USB-serial
 
 ## M9 — Tooling ⏳

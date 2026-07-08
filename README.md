@@ -48,6 +48,7 @@ Milestone tracking lives in [`ROADMAP.md`](ROADMAP.md). Snapshot:
 | **Boots a real embedded-Swift blink — drives the SwiftIO RGB LED** | ✅ |
 | **Boots the REAL MadMachine SwiftIO Blink** (`mm build`: SwiftIO + Zephyr + embedded Swift) through the full RTOS stack — **zero unimplemented instructions**, LED toggles | ✅ |
 | **Runs 9 REAL MadMachine SwiftIO Playground examples** — Potentiometer (ADC+IRQ), BreathingLED (PWM), Humiture (SHT3x I2C), Accelerometer (LIS3DH I2C), RTC (PCF8563 I2C), LCD (ST7789 SPI), Speaker (SAI/I2S), SerialLEDSwitch (UART RX) — each drives a real peripheral end-to-end with an emulated device/input | ✅ |
+| **Emulates `mm download`** — boots the real MadMachine `SerialLoader` bootloader and downloads over its framed serial protocol; bytes land in SDRAM, verified (`examples/mm_download.rs`) | ✅ |
 | **GDB remote stub** + `RT1060_TRACE` logging + criterion benches | ✅ |
 | SwiftIO 44-pin map (id→GPIO, from HAL static analysis) via `swiftio_pin()` | ✅ |
 | USB CDC enumeration, SEMC real command decode, ENET | ⬜ ROADMAP |
