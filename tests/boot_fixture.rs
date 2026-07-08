@@ -161,6 +161,43 @@ fn madmachine_swiftio_blink_toggles_the_led() {
     );
 }
 
+/// The **real MadMachine BreathingLED example** (`03Buzzer/BreathingLED`):
+/// `PWMOut(Id.PWM4A).setDutycycle(d)` with `d` ramping 0→1→0. It drives the
+/// FlexPWM peripheral, and the emulator observes the duty via `pwm_duty` —
+/// proof a real Swift program controls PWM output. Ignored by default.
+#[test]
+#[ignore = "runs ~150M instructions through Zephyr; cargo test --release -- --ignored"]
+fn madmachine_breathing_led_ramps_the_pwm_duty() {
+    use rt1060_rs::peripherals::pwm::Chan;
+    const PWM: &[u8] = include_bytes!("fixtures/madmachine_swiftio_pwm.elf");
+    let image = loader::load_elf(PWM).expect("parse ELF");
+    let mut soc = Rt1060::boot(&image);
+    soc.quiet();
+
+    // PWM4A resolves to FlexPWM4 submodule 3, channel A.
+    let duty = |soc: &Rt1060| soc.pwm_duty(4, 3, Chan::A);
+    let mut early = None;
+    let mut steps = 0u64;
+    while steps < 200_000_000 {
+        soc.step();
+        steps += 1;
+        // Capture the duty once the ramp is under way, then again well later.
+        if early.is_none() && duty(&soc).is_some_and(|d| d > 0.05) {
+            early = Some(duty(&soc).unwrap());
+            break;
+        }
+    }
+    let early = early.expect("the LED PWM duty should become observable");
+    for _ in 0..60_000_000u64 {
+        soc.step();
+    }
+    let later = duty(&soc).expect("PWM still driven");
+    assert!(
+        later > early,
+        "the breathing LED should ramp the PWM duty up ({early} -> {later})"
+    );
+}
+
 /// The **real MadMachine Potentiometer example** (`AnalogIn(A0).readVoltage()`
 /// printed once a second), built with the MadMachine SDK. It exercises the
 /// full external-interrupt path — the ADC's conversion-complete IRQ routes

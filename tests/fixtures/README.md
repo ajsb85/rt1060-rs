@@ -98,3 +98,11 @@ Zephyr's `_isr_wrapper`, which reads `IPSR` to index the software ISR table.
 Finding this exposed a core bug (`mrs Rd, IPSR` returned 0, sending every
 external interrupt to a garbage handler). Driving the ADC inputs to a known
 value makes the firmware print the matching voltage. See `tests/boot_fixture.rs`.
+
+### `madmachine_swiftio_pwm.elf`
+
+The **real MadMachine BreathingLED example** (SwiftIO Playground
+`03Buzzer/BreathingLED`) built with the MadMachine SDK: a `PWMOut(Id.PWM4A)`
+whose duty cycle ramps 0→1→0 to "breathe" an LED. It drives the FlexPWM
+peripheral; the emulator observes the changing duty via `Rt1060::pwm_duty(4, 3,
+Chan::A)`. See `tests/boot_fixture.rs`.
