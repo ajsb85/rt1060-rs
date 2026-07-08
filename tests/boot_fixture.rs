@@ -51,6 +51,49 @@ fn boots_from_sdram() {
     boots_and_configures_led(SDRAM, 0x8000_2000);
 }
 
+/// Boot a **real embedded-Swift** program (compiled with Swift 6.2 for
+/// `armv7em-none-none-eabi`, linked bare-metal for the RT1062) that blinks the
+/// SwiftIO RGB LED, and observe it toggle the RED + BLUE pins **by their
+/// SwiftIO logical ids** — end-to-end proof that Swift runs on the emulated
+/// chip and drives the pins recovered from the HalSwiftIO binary. Build
+/// sources: `tests/fixtures/swiftio_blink_src/`.
+#[test]
+fn embedded_swift_blinks_the_swiftio_rgb_led() {
+    const SWIFT_BLINK: &[u8] = include_bytes!("fixtures/swiftio_blink_embedded_swift.elf");
+    let image = loader::load_elf(SWIFT_BLINK).expect("parse ELF");
+    let mut soc = Rt1060::boot(&image);
+    soc.quiet();
+    assert_eq!(
+        image.base, 0x8000_0000,
+        "runs from SDRAM (MadMachine location)"
+    );
+    assert_eq!(soc.core.regs[13], 0x2002_0000, "initial SP = top of DTCM");
+
+    // RED = id 44 (GPIO1 pin 9), BLUE = id 46 (GPIO1 pin 11) — the Swift code
+    // drives both together. Count RED transitions via the swiftio_pin id API.
+    let mut transitions = 0;
+    let mut last = soc.swiftio_pin(44);
+    for _ in 0..300_000 {
+        soc.step();
+        let red = soc.swiftio_pin(44);
+        assert_eq!(
+            red,
+            soc.swiftio_pin(46),
+            "Swift drives RED and BLUE together"
+        );
+        if red != last {
+            transitions += 1;
+            last = red;
+        }
+    }
+    assert!(
+        transitions >= 4,
+        "the Swift blink toggled the RGB LED (saw {transitions})"
+    );
+    // GREEN (id 45, GPIO1 pin 10) is never configured/driven by this program.
+    assert_eq!(soc.swiftio_pin(45), Some(false), "GREEN untouched");
+}
+
 /// Deep check: run long enough for the delay loop to elapse and observe the
 /// LED actually toggle. Ignored by default (hundreds of millions of
 /// instructions); run with `cargo test --release -- --ignored`.

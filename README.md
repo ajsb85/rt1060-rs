@@ -42,7 +42,8 @@ Milestone tracking lives in [`ROADMAP.md`](ROADMAP.md). Snapshot:
 | USB OTG register block (init runs; full CDC enumeration ⬜) | ✅ |
 | FlexCAN (message buffers + loopback), SAI/I²S, FlexSPI controller | ✅ |
 | eDMA scatter-gather + channel linking; PLL2 PFD clock roots | ✅ |
-| **Boots real NXP SDK blinky from ITCM / FlexSPI-XIP / SDRAM — LED toggles** | ✅ |
+| **Boots real NXP SDK blinky (ITCM / FlexSPI-XIP / SDRAM) — LED toggles** | ✅ |
+| **Boots a real embedded-Swift blink — drives the SwiftIO RGB LED** | ✅ |
 | **GDB remote stub** + `RT1060_TRACE` logging + criterion benches | ✅ |
 | USB CDC enumeration, SEMC/FlexSPI IP command decode, ENET | ⬜ ROADMAP |
 | IOMUXC full 44-pin table, FPv5-D16 double-precision FPU | ⏳ |

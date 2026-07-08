@@ -44,3 +44,31 @@ paths. From the same SDK app dir as the ITCM variant.
 
 Still available (not committed): `../mm-sdk/boards/SerialLoader.bin` (the
 MadMachine second-stage RAM loader).
+
+### `swiftio_blink_embedded_swift.elf`
+
+A **real embedded-Swift** program (not the full MadMachine Zephyr stack — that
+needs the `madmachine-sdk` Swift SDK artifactbundle, which isn't installed
+here). Source in `swiftio_blink_src/`:
+
+- `blink.swift` — mirrors the MadMachine `Blink` example (toggle RED + BLUE)
+  but pokes the GPIO1 registers directly via `UnsafeMutablePointer`, using the
+  RGB LED pins recovered from the HalSwiftIO binary (RED = GPIO1 pin 9,
+  BLUE = GPIO1 pin 11).
+- `startup.c` — Cortex-M vector table (`[SP, Reset_Handler]`) + bare-metal
+  stubs for the runtime symbols embedded Swift references.
+- `link.ld` — links it into SDRAM at `0x8000_0000` (the MadMachine run
+  location).
+
+Built with the installed Swift 6.2 embedded toolchain:
+
+```sh
+swiftc -target armv7em-none-none-eabi -enable-experimental-feature Embedded \
+       -parse-as-library -Onone -wmo -c blink.swift -o blink.o
+arm-none-eabi-gcc -mcpu=cortex-m7 -mthumb -c startup.c -o startup.o
+arm-none-eabi-gcc -mcpu=cortex-m7 -mthumb -nostdlib -nostartfiles \
+       -T link.ld startup.o blink.o -o swiftio_blink_embedded_swift.elf
+```
+
+`tests/boot_fixture.rs::embedded_swift_blinks_the_swiftio_rgb_led` boots it and
+watches the RED/BLUE pins toggle via `Rt1060::swiftio_pin(id)`.
