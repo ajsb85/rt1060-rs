@@ -144,3 +144,11 @@ The **real MadMachine Speaker example** (SwiftIO Playground `09Speaker`):
 **SAI1**; the transfer is interrupt-driven (`SAI_TransferSendNonBlocking` +
 `SAI_TransferTxHandleIRQ`, IRQ 56). `tests/boot_fixture.rs` captures the
 transmitted SAI words and asserts a real (mostly non-zero) audio stream flows.
+
+### `madmachine_swiftio_accel.elf` / `madmachine_swiftio_rtc.elf`
+
+Two more real SwiftIO Playground examples over I2C (`Id.I2C0` = LPI2C3):
+`07Accelerometer` (MadDrivers `LIS3DH`, register-addressed reads with the `0x80`
+auto-increment bit) and `06RTC/ReadingTime` (MadDrivers `PCF8563`, a time
+write→read round-trip). `tests/boot_fixture.rs` models each with a seeded
+`MemI2cDevice` and asserts the decoded reading (Z = +1 g; `2023/04/09 … 10:26`).

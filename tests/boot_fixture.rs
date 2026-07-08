@@ -161,6 +161,73 @@ fn madmachine_swiftio_blink_toggles_the_led() {
     );
 }
 
+/// The **real MadMachine RTC example** (`06RTC/ReadingTime`): the MadDrivers
+/// `PCF8563` driver over `I2C(Id.I2C0)` sets the clock to 2023-04-09 10:26:00
+/// then reads it back and prints it. A blank register-file `MemI2cDevice` at
+/// 0x51 stores the time write and returns it on read (an I2C write→read
+/// round-trip). Ignored by default.
+#[test]
+#[ignore = "runs ~40M instructions through Zephyr; cargo test --release -- --ignored"]
+fn madmachine_rtc_round_trips_the_time_over_i2c() {
+    use rt1060_rs::peripherals::lpi2c::MemI2cDevice;
+    const RTC: &[u8] = include_bytes!("fixtures/madmachine_swiftio_rtc.elf");
+    let image = loader::load_elf(RTC).expect("parse ELF");
+    let mut soc = Rt1060::boot(&image);
+    soc.quiet();
+    // PCF8563 at 0x51 on I2C0 (LPI2C3 = index 2). Seed the VL bit (bit 7 of the
+    // seconds register 0x02) so the driver's lostPower() check is true and it
+    // actually writes the time before reading it back.
+    soc.bus.periph.lpi2c[2].attach(Box::new(MemI2cDevice::new(0x51).with(0x02, 0x80)));
+    let mut console = String::new();
+    for _ in 0..60_000_000u64 {
+        soc.step();
+        console.push_str(&soc.console_string());
+        // "10:26" is printed after the date on the same line, so waiting for it
+        // guarantees the whole "2023/04/09 … 10:26:00" line has flushed.
+        if console.contains("10:26") {
+            break;
+        }
+    }
+    assert!(
+        console.contains("2023/04/09") && console.contains("10:26"),
+        "the RTC should read back the time it set: {console:?}"
+    );
+}
+
+/// The **real MadMachine Accelerometer example** (`07Accelerometer`): the
+/// MadDrivers `LIS3DH` driver over `I2C(Id.I2C0)` reading X/Y/Z and printing
+/// them. Unlike the SHT3x (command-based), the LIS3DH is register-addressed
+/// (WHO_AM_I = 0x33, `OUT_*` at `0x28`, auto-increment bit `0x80`), so a seeded
+/// `MemI2cDevice` models it: Z = +1g (raw 15987 = `0x3E73`, so `0x73`/`0x3E`
+/// land at `0xAC`/`0xAD` under the auto-increment offset). Ignored by default.
+#[test]
+#[ignore = "runs ~40M instructions through Zephyr; cargo test --release -- --ignored"]
+fn madmachine_accelerometer_reads_the_i2c_sensor() {
+    use rt1060_rs::peripherals::lpi2c::MemI2cDevice;
+    const ACCEL: &[u8] = include_bytes!("fixtures/madmachine_swiftio_accel.elf");
+    let image = loader::load_elf(ACCEL).expect("parse ELF");
+    let mut soc = Rt1060::boot(&image);
+    soc.quiet();
+    // LIS3DH at 0x18 on I2C0 (LPI2C3 = index 2).
+    let lis3dh = MemI2cDevice::new(0x18)
+        .with(0x0F, 0x33) // WHO_AM_I
+        .with(0xAC, 0x73) // OUT_Z_L  (0x2C | 0x80 auto-increment)
+        .with(0xAD, 0x3E); // OUT_Z_H → Z raw = 0x3E73 = 15987 → 1.0 g
+    soc.bus.periph.lpi2c[2].attach(Box::new(lis3dh));
+    let mut console = String::new();
+    for _ in 0..60_000_000u64 {
+        soc.step();
+        console.push_str(&soc.console_string());
+        if console.contains("z: 1.0") {
+            break;
+        }
+    }
+    assert!(
+        console.contains("z: 1.0"),
+        "the accelerometer should read Z = +1g: {console:?}"
+    );
+}
+
 /// The **real MadMachine Speaker example** (`09Speaker`): `I2S(Id.I2S0)` plays a
 /// musical scale (square-wave tones). SwiftIO `Id.I2S0` is SAI1; the transfer is
 /// interrupt-driven (`SAI_TransferSendNonBlocking` + `SAI_TransferTxHandleIRQ`
