@@ -136,3 +136,11 @@ The **real MadMachine SerialLEDSwitch example** (SwiftIO Playground
 interrupt-driven (RDRF → IRQ 21 ISR → ring buffer). `tests/boot_fixture.rs`
 pushes bytes into the LPUART2 RX FIFO and asserts the LED (`swiftio_pin(18)`)
 follows — the first real-firmware validation of serial **input**.
+
+### `madmachine_swiftio_i2s.elf`
+
+The **real MadMachine Speaker example** (SwiftIO Playground `09Speaker`):
+`I2S(Id.I2S0)` plays a musical scale of square-wave tones. SwiftIO `Id.I2S0` is
+**SAI1**; the transfer is interrupt-driven (`SAI_TransferSendNonBlocking` +
+`SAI_TransferTxHandleIRQ`, IRQ 56). `tests/boot_fixture.rs` captures the
+transmitted SAI words and asserts a real (mostly non-zero) audio stream flows.

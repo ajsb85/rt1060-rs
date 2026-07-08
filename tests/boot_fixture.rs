@@ -161,6 +161,41 @@ fn madmachine_swiftio_blink_toggles_the_led() {
     );
 }
 
+/// The **real MadMachine Speaker example** (`09Speaker`): `I2S(Id.I2S0)` plays a
+/// musical scale (square-wave tones). SwiftIO `Id.I2S0` is SAI1; the transfer is
+/// interrupt-driven (`SAI_TransferSendNonBlocking` + `SAI_TransferTxHandleIRQ`
+/// on IRQ 56). The emulator captures the transmitted SAI words — a real audio
+/// stream, not silence. Ignored by default.
+#[test]
+#[ignore = "runs ~40M instructions through Zephyr; cargo test --release -- --ignored"]
+fn madmachine_speaker_streams_audio_over_i2s() {
+    const I2S: &[u8] = include_bytes!("fixtures/madmachine_swiftio_i2s.elf");
+    let image = loader::load_elf(I2S).expect("parse ELF");
+    let mut soc = Rt1060::boot(&image);
+    soc.quiet();
+    let mut words = 0usize;
+    let mut nonzero = 0usize;
+    for _ in 0..40 {
+        for _ in 0..1_000_000u64 {
+            soc.step();
+        }
+        for w in soc.bus.periph.sai[0].take_output() {
+            words += 1;
+            if w != 0 {
+                nonzero += 1;
+            }
+        }
+    }
+    assert!(
+        words > 10_000,
+        "the speaker should stream audio samples over I2S (saw {words})"
+    );
+    assert!(
+        nonzero > words / 2,
+        "the samples should be a real waveform, not silence ({nonzero}/{words} non-zero)"
+    );
+}
+
 /// The **real MadMachine SerialLEDSwitch example** (`10UART/SerialLEDSwitch`):
 /// reads `UART(Id.UART0)` and turns LED `D18` on for `"1"`, off for `"0"`.
 /// SwiftIO `Id.UART0` is LPUART2; the SwiftIO HAL RX path is interrupt-driven
