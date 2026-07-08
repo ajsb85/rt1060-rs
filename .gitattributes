@@ -29,3 +29,4 @@ Cargo.lock text -diff
 tests/fixtures/*.elf binary
 tests/fixtures/swiftio_blink_src/*.swift text
 tests/fixtures/swiftio_blink_src/*.c text
+tests/fixtures/*.elf binary

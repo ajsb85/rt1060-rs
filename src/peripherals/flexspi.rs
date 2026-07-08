@@ -27,6 +27,8 @@
 const MCR0: u32 = 0x00;
 const INTEN: u32 = 0x10;
 const INTR: u32 = 0x14;
+const IPCR0: u32 = 0xA0; // IP control 0: flash device address
+const IPCR1: u32 = 0xA4; // IP control 1: IDATSZ [15:0], ISEQID [23:16]
 const IPCMD: u32 = 0xB0;
 const STS0: u32 = 0xE0;
 const IPRXFSTS: u32 = 0xF0; // IP RX FIFO status (FILL count in low byte)
@@ -39,10 +41,28 @@ const STS0_SEQIDLE: u32 = 1 << 0;
 const STS0_ARBIDLE: u32 = 1 << 1;
 const IPCMD_TRG: u32 = 1 << 0;
 
+/// A flash operation an IP command triggered, serviced by the bus against the
+/// backed FlexSPI NOR region (the FlexSPI peripheral has no memory of its own).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FlashOp {
+    /// Program `data` at flash offset `addr` (NOR program only clears bits).
+    Program { addr: u32, data: Vec<u8> },
+    /// Read `size` bytes from flash offset `addr` into the RX FIFO.
+    Read { addr: u32, size: u32 },
+    /// Erase the sector containing `addr` (restore it to `0xFF`).
+    Erase { addr: u32 },
+}
+
 pub struct FlexSpi {
     pub index: u8,
     regs: [u32; 0x100], // 1 KiB register file
     intr: u32,
+    /// Bytes written to `IPTXFDR` awaiting a program command.
+    tx: Vec<u8>,
+    /// Data staged from a flash read, served out of `IPRXFDR`.
+    rx: std::collections::VecDeque<u8>,
+    /// A flash op the bus must service (set at `IPCMD` strobe).
+    pending: Option<FlashOp>,
 }
 
 impl FlexSpi {
@@ -51,6 +71,9 @@ impl FlexSpi {
             index,
             regs: [0; 0x100],
             intr: 0,
+            tx: Vec::new(),
+            rx: std::collections::VecDeque::new(),
+            pending: None,
         }
     }
 
@@ -58,16 +81,21 @@ impl FlexSpi {
         match off {
             MCR0 => self.regs[0] & !MCR0_SWRESET, // SWRESET self-cleared
             // The RX watermark is always available and the TX FIFO always has
-            // space (the IP engine serves erased flash endlessly and drains
-            // writes instantly), so FLEXSPI_ReadBlocking / _WriteBlocking's
-            // polls on INTR.IPRXWA (bit 5) / IPTXWE (bit 6) terminate.
+            // space, so FLEXSPI_Read/WriteBlocking's polls on INTR.IPRXWA
+            // (bit 5) / IPTXWE (bit 6) terminate.
             INTR => self.intr | INTR_IPRXWA | INTR_IPTXWE,
             STS0 => STS0_SEQIDLE | STS0_ARBIDLE, // always idle
             // IPRXFSTS: FILL count (8-byte entries) in the low byte —
-            // FLEXSPI_ReadBlocking waits for `remaining <= FILL*8`. Report the
-            // FIFO as full so the read drains immediately.
+            // FLEXSPI_ReadBlocking waits for `remaining <= FILL*8`; report full.
             IPRXFSTS => 0x0000_00FF,
-            0x100..=0x17C => 0xFFFF_FFFF, // IP RX FIFO: erased flash
+            0x100..=0x17C => {
+                // IPRXFDR: pop a staged flash word (little-endian).
+                let mut w = [0u8; 4];
+                for b in &mut w {
+                    *b = self.rx.pop_front().unwrap_or(0xFF);
+                }
+                u32::from_le_bytes(w)
+            }
             _ => self.regs[(off >> 2) as usize & 0xFF],
         }
     }
@@ -76,13 +104,41 @@ impl FlexSpi {
         match off {
             MCR0 => self.regs[0] = value & !MCR0_SWRESET,
             INTR => self.intr &= !value, // W1C
+            0x180..=0x19C => self.tx.extend_from_slice(&value.to_le_bytes()), // IPTXFDR
             IPCMD => {
                 if value & IPCMD_TRG != 0 {
-                    self.intr |= INTR_IPCMDDONE | INTR_IPRXWA;
+                    self.intr |= INTR_IPCMDDONE | INTR_IPRXWA | INTR_IPTXWE;
+                    let addr = self.regs[(IPCR0 >> 2) as usize];
+                    let size = self.regs[(IPCR1 >> 2) as usize] & 0xFFFF;
+                    self.pending = if !self.tx.is_empty() {
+                        Some(FlashOp::Program {
+                            addr,
+                            data: std::mem::take(&mut self.tx),
+                        })
+                    } else if size > 0 {
+                        Some(FlashOp::Read { addr, size })
+                    } else if addr != 0 {
+                        // Command-only with an address = a sector/block erase
+                        // (write-enable and status commands use addr 0).
+                        Some(FlashOp::Erase { addr })
+                    } else {
+                        None // WREN / WRDI / other addressless command
+                    };
                 }
             }
             _ => self.regs[(off >> 2) as usize & 0xFF] = value,
         }
+    }
+
+    /// Take the flash op an IP command triggered (for the bus to service).
+    pub fn take_pending(&mut self) -> Option<FlashOp> {
+        self.pending.take()
+    }
+
+    /// Stage bytes read from flash into the RX FIFO.
+    pub fn stage_rx(&mut self, data: &[u8]) {
+        self.rx.clear();
+        self.rx.extend(data.iter().copied());
     }
 
     pub fn irq_pending(&self) -> bool {

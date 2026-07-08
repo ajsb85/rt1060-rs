@@ -192,11 +192,54 @@ impl SystemBus {
     /// A write into the eDMA window may have set `TCD.CSR.START` / `SSRT` —
     /// service the engine at strobe time (like the mg24-rs LDMA), moving data
     /// through the full bus. The engine is swapped out so it can borrow the
-    /// bus for descriptor + FIFO access.
+    /// bus for descriptor + FIFO access. A write into the FlexSPI window may
+    /// have strobed an IP command against the NOR flash.
     #[inline]
     fn dma_trigger(&mut self, addr: u32) {
-        if addr & !0x3FFF == crate::peripherals::base::DMA0 {
+        let base = addr & !0x3FFF;
+        if base == crate::peripherals::base::DMA0 {
             self.edma_service();
+        } else if base == crate::peripherals::base::FLEXSPI {
+            self.flexspi_service();
+        }
+    }
+
+    /// Service a FlexSPI IP command against the backed NOR flash region: a
+    /// program clears bits into flash (NOR semantics), a read stages flash
+    /// bytes into the RX FIFO. Small reads answer a status poll (WIP clear) or
+    /// the JEDEC ID (IS25WP128 `9d 70 17`), so the Zephyr littlefs/NOR driver
+    /// mounts on the backed flash. FlexSPI1 only (FlexSPI2's device is not
+    /// backed).
+    pub fn flexspi_service(&mut self) {
+        use crate::peripherals::flexspi::FlashOp;
+        let Some(op) = self.periph.flexspi[0].take_pending() else {
+            return;
+        };
+        let mask = self.flash.len() - 1; // 16 MiB, power of two
+        match op {
+            FlashOp::Program { addr, data } => {
+                for (k, &b) in data.iter().enumerate() {
+                    let a = (addr as usize + k) & mask;
+                    self.flash[a] &= b; // NOR program only clears bits
+                }
+            }
+            FlashOp::Read { addr, size } => {
+                let data: Vec<u8> = if size == 3 {
+                    vec![0x9d, 0x70, 0x17] // IS25WP128 JEDEC ID (mm_feather dts)
+                } else if size <= 4 {
+                    vec![0u8; size as usize] // status register: WIP clear
+                } else {
+                    (0..size as usize)
+                        .map(|k| self.flash[(addr as usize + k) & mask])
+                        .collect()
+                };
+                self.periph.flexspi[0].stage_rx(&data);
+            }
+            FlashOp::Erase { addr } => {
+                // 4 KiB sector erase (IS25WP128) → restore to 0xFF.
+                let sector = (addr as usize & mask) & !0xFFF;
+                self.flash[sector..sector + 0x1000].fill(0xFF);
+            }
         }
     }
 
