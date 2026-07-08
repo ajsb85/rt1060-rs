@@ -125,6 +125,15 @@ impl Rt1060 {
     pub fn console_string(&mut self) -> String {
         self.bus.periph.lpuart[0].take_output_string()
     }
+
+    /// Feed bytes into the LPUART1 (console) RX FIFO, as if typed on the
+    /// USB-serial bridge. Interactive firmware (a Swift REPL prompt, a
+    /// Zephyr shell) reads them back through DATA / raises the RX interrupt.
+    pub fn push_console_input(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.bus.periph.lpuart[0].rx_push(b);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -170,6 +179,18 @@ mod tests {
         assert_eq!(soc.bus.read32(map::DTCM_BASE), 0x42);
         // And the core is spinning at the branch.
         assert!(soc.core.regs[15] >= map::SDRAM_BASE + 0x100);
+    }
+
+    #[test]
+    fn console_input_reaches_lpuart1_rx() {
+        let img = boot_image(&[b(-2)]); // reset handler just spins
+        let mut soc = Rt1060::boot(&img);
+        soc.quiet();
+        soc.push_console_input(b"hi");
+        // LPUART1 STAT.RDRF (bit 21) is set and DATA pops the bytes in order.
+        assert_ne!(soc.bus.read32(0x4018_4014) & (1 << 21), 0);
+        assert_eq!(soc.bus.read32(0x4018_401C), u32::from(b'h'));
+        assert_eq!(soc.bus.read32(0x4018_401C), u32::from(b'i'));
     }
 
     #[test]
