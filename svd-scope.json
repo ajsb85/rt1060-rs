@@ -1,0 +1,45 @@
+{
+  "name": "MIMXRT1062",
+  "modeled": [
+    "GPIO1", "GPIO2", "GPIO3", "GPIO4", "GPIO5",
+    "GPIO6", "GPIO7", "GPIO8", "GPIO9",
+    "LPUART1", "LPUART2", "LPUART3", "LPUART4",
+    "LPUART5", "LPUART6", "LPUART7", "LPUART8",
+    "LPI2C1", "LPI2C2", "LPI2C3", "LPI2C4",
+    "LPSPI1", "LPSPI2", "LPSPI3", "LPSPI4",
+    "ADC1", "ADC2",
+    "GPT1", "GPT2", "PIT",
+    "TMR1", "TMR2", "TMR3", "TMR4",
+    "PWM1", "PWM2", "PWM3", "PWM4",
+    "CCM", "CCM_ANALOG", "DCDC", "SRC",
+    "IOMUXC", "IOMUXC_GPR",
+    "SEMC", "FLEXSPI", "FLEXSPI2",
+    "WDOG1", "WDOG2", "RTWDOG"
+  ],
+  "stub": [
+    "GPIO10",
+    "DMA0", "DMAMUX",
+    "USB1", "USB2", "USBNC1", "USBNC2", "USBPHY1", "USBPHY2", "USB_ANALOG",
+    "CAN1", "CAN2", "CAN3",
+    "ENET", "ENET2",
+    "SAI1", "SAI2", "SAI3", "SPDIF",
+    "USDHC1", "USDHC2",
+    "PMU", "TEMPMON", "XTALOSC24M", "SNVS", "GPC", "PGC", "DCP", "TRNG",
+    "OCOTP", "CSU", "BEE", "ROMC", "FLEXRAM", "EWM",
+    "AIPSTZ1", "AIPSTZ2", "AIPSTZ3", "AIPSTZ4",
+    "IOMUXC_SNVS", "IOMUXC_SNVS_GPR",
+    "CMP1", "CMP2", "CMP3", "CMP4",
+    "ADC_ETC", "TSC", "KPP",
+    "FLEXIO1", "FLEXIO2", "FLEXIO3",
+    "LCDIF", "PXP", "CSI", "ELCDIF",
+    "ENC1", "ENC2", "ENC3", "ENC4",
+    "XBARA1", "XBARB2", "XBARB3", "AOI1", "AOI2",
+    "SystemControl", "NVIC", "MPU", "CM7_MCM"
+  ],
+  "critical": {
+    "LPUART1": ["TDRE", "RDRF"],
+    "LPI2C1": ["NDF", "RDF", "MBF", "SDF"],
+    "LPSPI1": ["TDF", "RDF", "TCF"],
+    "CCM_ANALOG": ["LOCK", "OSC_XTALOK"]
+  }
+}
