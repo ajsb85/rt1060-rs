@@ -24,6 +24,8 @@ every memory access goes through a borrowed `Bus`, and there is no
 
 ## Status
 
+[![SVD register coverage](https://img.shields.io/badge/SVD_coverage-42%2F50_register--complete-green)](docs/svd-coverage.md)
+
 Milestone tracking lives in [`ROADMAP.md`](ROADMAP.md). Snapshot:
 
 | Area | State |
@@ -50,6 +52,7 @@ Milestone tracking lives in [`ROADMAP.md`](ROADMAP.md). Snapshot:
 | **Runs 9 REAL MadMachine SwiftIO Playground examples** — Potentiometer (ADC+IRQ), BreathingLED (PWM), Humiture (SHT3x I2C), Accelerometer (LIS3DH I2C), RTC (PCF8563 I2C), LCD (ST7789 SPI), Speaker (SAI/I2S), SerialLEDSwitch (UART RX) — each drives a real peripheral end-to-end with an emulated device/input | ✅ |
 | **Emulates `mm download` end-to-end** — boots the real `SerialLoader` bootloader, programs a real `micro.img` to the NOR `user` partition over the serial protocol, then **two-stage boots** it: `cold_boot_from_flash` models the Boot ROM (NOR → parse header → SDRAM → run the Zephyr app) | ✅ |
 | **GDB remote stub** + `RT1060_TRACE` logging + criterion benches | ✅ |
+| **SVD register audit** — 50 in-scope peripherals, 42 register-complete (buses/clocks/timers), critical status bits verified ([`docs/svd-coverage.md`](docs/svd-coverage.md)) | ✅ |
 | SwiftIO 44-pin map (id→GPIO, from HAL static analysis) via `swiftio_pin()` | ✅ |
 | **HIL parity vs a physical Teensy 4.1** (same MIMXRT1062) — boots PJRC's unmodified Arduino blinky via the i.MX RT Boot ROM → IVT path (`cold_boot_from_ivt`) and reproduces the **exact LED cadence** (SysTick 100 kHz external clock); cross-checked against the board flashed with the same `.hex` | ✅ |
 | **Real MadMachine SwiftIO stack on a Teensy 4.1** — `import SwiftIO`/Zephyr re-based off SDRAM into OCRAM + wrapped as a Teensy flash image; boots with zero unimplemented instructions and blinks the onboard LED (`DigitalOut(Id.D16)`); flashed to the physical board, LED blinks at 1 Hz | ✅ |
@@ -104,6 +107,55 @@ Every nontrivial register cites its source: the CMSIS header
 manual, or the cross-checked Renode `IMX*` models (RT1064 is memory-map
 identical to RT1062). See [`CLAUDE.md`](CLAUDE.md) for the hard rules and
 [`CONTRIBUTING.md`](CONTRIBUTING.md) for the workflow.
+
+## SVD register coverage
+
+Audited by [`svd-coverage.py`](../../dev/boardforge/tools/svd-coverage.py)
+against the NXP CMSIS-SVD `mcux-soc-svd/MIMXRT1062/MIMXRT1062.xml` (117
+peripherals); scope in [`svd-scope.json`](svd-scope.json), full report in
+[`docs/svd-coverage.md`](docs/svd-coverage.md).
+
+**50 in-scope peripherals — 42 register-complete, 8 with documented surface
+gaps.** The audited set is the CPU buses, clock/reset tree, timers, and the
+NOR/SDRAM front-ends; the other 67 SVD peripherals (ENET, the full DMA/CAN
+register maps, USBPHY, display/camera, crypto) are out-of-scope stubs.
+
+Two backing styles, so a sub-100% number can mean two different things:
+
+- **Explicit per-register models** — GPIO×9, LPUART×8, ADC×2, GPT×2, PIT, SRC,
+  DCDC, WDOG×2/RTWDOG, and the LPI2C/LPSPI buses. Unhandled offsets truly read
+  0, so the audit count is exact; **27 of these are 100%**.
+- **Whole-window backing** — CCM, CCM_ANALOG (SET/CLR/TOG alias quad), SEMC,
+  FLEXSPI×2, IOMUXC(_GPR), FlexPWM×4, QTMR×4. A flat offset-indexed array
+  covers **every** register by construction, so the reported <100% is an audit
+  artifact (no per-offset literal to match), not a missing register — the
+  status bits firmware polls (`CDHIPR`, `STS0` idle, PLL `LOCK`) are forced in
+  explicit arms.
+
+Critical status contracts all verify in source: LPUART `STAT.TDRE/RDRF`, LPI2C
+`MSR.NDF/RDF/MBF/SDF`, LPSPI `SR.TDF/RDF/TCF`, CCM_ANALOG PLL `LOCK` +
+`OSC_XTALOK`.
+
+### v2 register gaps (genuine, in-scope)
+
+The only genuinely-unmodeled in-scope registers — each an unmodeled *mode* or
+an *instant-transfer* timing knob with no observable effect at this emulator's
+transaction fidelity (behavioural vs. surface, called out honestly):
+
+- [ ] **LPI2C slave block** — `SCR`/`SSR`/`SIER`/`SDER`/`SCFGR1/2`/`SAMR`/
+      `SASR`/`STAR`/`STDR`/`SRDR` read 0: the SwiftIO / Zephyr / Arduino
+      targets drive LPI2C as **I²C master only** (*behavioural* —
+      START/addr/data/STOP with host-answered reads). Slave mode is the v2
+      item.
+- [ ] **LPI2C master timing** — `MCFGR2` (glitch filter), `MDMR` (data-match),
+      `MCCR0` (clock high/low): *register-surface* — no timing effect at
+      instant transfer. v2 stores/reads-back rather than dropping the write.
+- [ ] **LPSPI `DMR1` / `CCR`** — data-match 1 and the clock-delay fields
+      (`SCKDIV`/`DBT`/`PCSSCK`/`SCKPCS`): *register-surface* — data-match is
+      unmodeled and the shift is instantaneous. v2 is store/read-back.
+
+Everything else the auditor flags is a whole-window readback block
+(functionally complete) — see [`docs/svd-coverage.md`](docs/svd-coverage.md).
 
 ## License
 
