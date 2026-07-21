@@ -173,6 +173,14 @@ pub mod irq {
     pub const GPIO1_COMBINED_16_31: u32 = 81;
     pub const GPIO2_COMBINED_0_15: u32 = 82;
     pub const GPIO2_COMBINED_16_31: u32 = 83;
+    pub const GPIO3_COMBINED_0_15: u32 = 84;
+    pub const GPIO3_COMBINED_16_31: u32 = 85;
+    pub const GPIO4_COMBINED_0_15: u32 = 86;
+    pub const GPIO4_COMBINED_16_31: u32 = 87;
+    pub const GPIO5_COMBINED_0_15: u32 = 88;
+    pub const GPIO5_COMBINED_16_31: u32 = 89;
+    /// GPIO6..9 share one combined line (MIMXRT1062.h `GPIO6_7_8_9_IRQn`).
+    pub const GPIO6_7_8_9: u32 = 157;
     pub const ADC1: u32 = 67;
     pub const ADC2: u32 = 68;
     pub const GPT1: u32 = 100;
@@ -194,6 +202,34 @@ pub mod irq {
     pub const SAI1: u32 = 56;
     pub const SAI2: u32 = 57;
     pub const SAI3: u32 = 58;
+}
+
+// ---------------------------------------------------------------------------
+// Bus-event trace
+// ---------------------------------------------------------------------------
+
+/// Ordered log of firmware-driven bus activity for an embedding host (a
+/// boardforge-style wiring engine). Recorded only when
+/// [`Peripherals::trace_bus`] is set — the hot loop stays allocation-free by
+/// default — and drained from [`Peripherals::bus_events`] between step
+/// batches. Ordering across peripherals is preserved (a GPIO chip-select
+/// write lands before the LPSPI `TDR` write it frames). Indices are the
+/// peripheral array indices (`ctrl` 0 = GPIO1, `idx` 0 = LPUART1 / LPI2C1 /
+/// LPSPI1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BusEvent {
+    /// GPIO DR/GDIR-affecting write (DR, GDIR, DR_SET/CLEAR/TOGGLE) with the
+    /// post-write snapshot.
+    GpioOut { ctrl: u8, dr: u32, gdir: u32 },
+    /// IOMUXC window write (pad mux/config/daisy), offset within the window.
+    IomuxcWrite { offset: u32, value: u32 },
+    /// LPUART `DATA` write with the transmitter enabled.
+    UartTx { idx: u8, byte: u8 },
+    /// LPI2C `MTDR` command word (CMD in bits [10:8], DATA in [7:0]).
+    I2cCmd { idx: u8, cmd: u32 },
+    /// LPSPI `TDR` write while enabled: the MOSI word masked to the frame
+    /// size (`bits` = `TCR.FRAMESZ` + 1, capped at 32).
+    SpiTx { idx: u8, word: u32, bits: u8 },
 }
 
 // ---------------------------------------------------------------------------
@@ -249,6 +285,9 @@ pub struct Peripherals {
     pub unknown: RawRegs,
     /// Log first access to each unknown base (default true).
     pub log_unknown: bool,
+    /// Record firmware bus writes into `bus_events` for an embedding host.
+    pub trace_bus: bool,
+    pub bus_events: Vec<BusEvent>,
     warned_unknown: std::collections::BTreeSet<u32>,
     /// Cached clock roots (Hz), recomputed whenever CCM/CCM_ANALOG is written.
     core_hz: u64,
@@ -313,6 +352,8 @@ impl Peripherals {
             gpio: std::array::from_fn(|i| gpio::Gpio::new(i as u8 + 1)),
             unknown: RawRegs::new("unknown"),
             log_unknown: true,
+            trace_bus: false,
+            bus_events: Vec::new(),
             warned_unknown: std::collections::BTreeSet::new(),
             core_hz: 1,
             perclk_hz: 1,
@@ -464,6 +505,61 @@ impl Peripherals {
         if b == base::CCM || b == base::CCM_ANALOG {
             self.refresh_clocks();
         }
+        if self.trace_bus {
+            self.trace_bus_write(b, off, value);
+        }
+    }
+
+    /// Append a [`BusEvent`] for a routed write. Runs post-dispatch so the
+    /// GPIO snapshot observes the new DR/GDIR. Narrow (8/16-bit) peripheral
+    /// writes funnel through [`Peripherals::write`], so they are traced too.
+    fn trace_bus_write(&mut self, b: u32, off: u32, value: u32) {
+        let ev = match b {
+            _ if is_gpio(b) && matches!(off, 0x00 | 0x04 | 0x84 | 0x88 | 0x8C) => {
+                let i = gpio_index(b);
+                let g = &mut self.gpio[i];
+                BusEvent::GpioOut {
+                    ctrl: i as u8,
+                    dr: g.read(0x00),
+                    gdir: g.read(0x04),
+                }
+            }
+            base::IOMUXC => BusEvent::IomuxcWrite { offset: off, value },
+            base::LPUART1..=base::LPUART8 if off == 0x1C => {
+                let idx = lpuart_index(b);
+                if !self.lpuart[idx].tx_enabled() {
+                    return;
+                }
+                BusEvent::UartTx {
+                    idx: idx as u8,
+                    byte: value as u8,
+                }
+            }
+            base::LPI2C1..=base::LPI2C4 if off == 0x60 => BusEvent::I2cCmd {
+                idx: ((b - base::LPI2C1) / 0x4000) as u8,
+                cmd: value & 0x7FF,
+            },
+            base::LPSPI1..=base::LPSPI4 if off == 0x64 => {
+                let idx = ((b - base::LPSPI1) / 0x4000) as usize;
+                let s = &self.lpspi[idx];
+                if !s.enabled() {
+                    return;
+                }
+                let bits = s.frame_bits().min(32);
+                let mask = if bits >= 32 {
+                    u32::MAX
+                } else {
+                    (1u32 << bits) - 1
+                };
+                BusEvent::SpiTx {
+                    idx: idx as u8,
+                    word: value & mask,
+                    bits: bits as u8,
+                }
+            }
+            _ => return,
+        };
+        self.bus_events.push(ev);
     }
 
     // --- width-accurate narrow access ---------------------------------------
@@ -716,19 +812,20 @@ impl Peripherals {
                 m.set(ch); // DMAn_DMAn+16 = IRQ n
             }
         }
-        // GPIO1..2 combined lines (0..15 / 16..31). GPIO3+ combined lines
-        // land in the ROADMAP as their pin banks come online.
-        if self.gpio[0].irq_pending_low() {
-            m.set(irq::GPIO1_COMBINED_0_15);
-        }
-        if self.gpio[0].irq_pending_high() {
-            m.set(irq::GPIO1_COMBINED_16_31);
-        }
-        if self.gpio[1].irq_pending_low() {
-            m.set(irq::GPIO2_COMBINED_0_15);
-        }
-        if self.gpio[1].irq_pending_high() {
-            m.set(irq::GPIO2_COMBINED_16_31);
+        // GPIO1..5 combined lines (0..15 / 16..31 pairs, IRQ 80..89);
+        // GPIO6..9 share IRQ 157 (MIMXRT1062.h `GPIO_COMBINED_LOW_IRQS`).
+        for (i, g) in self.gpio.iter().enumerate() {
+            let (lo, hi) = (g.irq_pending_low(), g.irq_pending_high());
+            if i < 5 {
+                if lo {
+                    m.set(irq::GPIO1_COMBINED_0_15 + 2 * i as u32);
+                }
+                if hi {
+                    m.set(irq::GPIO1_COMBINED_16_31 + 2 * i as u32);
+                }
+            } else if lo || hi {
+                m.set(irq::GPIO6_7_8_9);
+            }
         }
         m
     }
@@ -794,6 +891,77 @@ mod tests {
         assert_eq!(gpio_index(base::GPIO9), 8);
         assert!(is_gpio(base::GPIO5));
         assert!(!is_gpio(base::CCM));
+    }
+
+    #[test]
+    fn bus_event_trace_orders_firmware_writes() {
+        let mut p = Peripherals::new();
+        p.log_unknown = false;
+        p.trace_bus = true;
+        p.write(base::GPIO1 + 0x04, 1 << 9); // GDIR
+        p.write(base::LPUART1 + 0x18, 1 << 19); // CTRL.TE — no event
+        p.write(base::LPUART1 + 0x1C, u32::from(b'A')); // DATA
+        p.write(base::LPSPI3 + 0x10, 1); // CR.MEN — no event
+        p.write(base::LPSPI3 + 0x60, 7); // TCR: 8-bit frames — no event
+        p.write(base::LPSPI3 + 0x64, 0x1A5); // TDR → masked to 0xA5
+        p.write(base::LPI2C3 + 0x60, (0b100 << 8) | 0x3A); // START
+        p.write(base::IOMUXC + 0x14, 5);
+        p.write(base::GPIO1 + 0x84, 1 << 9); // DR_SET
+        assert_eq!(
+            p.bus_events,
+            vec![
+                BusEvent::GpioOut {
+                    ctrl: 0,
+                    dr: 0,
+                    gdir: 1 << 9
+                },
+                BusEvent::UartTx { idx: 0, byte: b'A' },
+                BusEvent::SpiTx {
+                    idx: 2,
+                    word: 0xA5,
+                    bits: 8
+                },
+                BusEvent::I2cCmd {
+                    idx: 2,
+                    cmd: (0b100 << 8) | 0x3A
+                },
+                BusEvent::IomuxcWrite {
+                    offset: 0x14,
+                    value: 5
+                },
+                BusEvent::GpioOut {
+                    ctrl: 0,
+                    dr: 1 << 9,
+                    gdir: 1 << 9
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn bus_event_trace_off_by_default() {
+        let mut p = Peripherals::new();
+        p.log_unknown = false;
+        p.write(base::GPIO1 + 0x04, 1 << 9);
+        p.write(base::LPUART1 + 0x18, 1 << 19);
+        p.write(base::LPUART1 + 0x1C, u32::from(b'A'));
+        assert!(p.bus_events.is_empty());
+    }
+
+    #[test]
+    fn gpio_input_edges_reach_the_combined_irq_lines() {
+        let mut p = Peripherals::new();
+        p.log_unknown = false;
+        // GPIO3 pin 2: rising edge (ICR1 cfg 0b10) + unmask → IRQ 84.
+        p.write(base::GPIO3 + 0x0C, 0b10 << 4);
+        p.write(base::GPIO3 + 0x14, 1 << 2);
+        p.gpio[2].set_input(2, true);
+        assert!(p.irq_lines().test(irq::GPIO3_COMBINED_0_15));
+        // GPIO7 pin 3: any edge (EDGE_SEL) + unmask → the shared IRQ 157.
+        p.write(base::GPIO7 + 0x1C, 1 << 3);
+        p.write(base::GPIO7 + 0x14, 1 << 3);
+        p.gpio[6].set_input(3, true);
+        assert!(p.irq_lines().test(irq::GPIO6_7_8_9));
     }
 
     #[test]

@@ -38,6 +38,11 @@ pub trait SpiDevice {
 
 pub struct LpSpi {
     pub index: u8,
+    /// Host-bridged mode for an embedding wiring engine: `TDR` writes are
+    /// recorded in the bus-event trace instead of shifting against the
+    /// locally attached `device`, and the host supplies MISO words via
+    /// [`LpSpi::rx_push`]. WCF/FCF/TCF stay local — firmware polls/W1Cs them.
+    pub external: bool,
     cr: u32,
     ier: u32,
     der: u32,
@@ -52,6 +57,7 @@ impl LpSpi {
     pub fn new(index: u8) -> Self {
         Self {
             index,
+            external: false,
             cr: 0,
             ier: 0,
             der: 0,
@@ -65,6 +71,21 @@ impl LpSpi {
     /// Attach the device selected on this bus (single-target for now).
     pub fn attach(&mut self, dev: Box<dyn SpiDevice + Send>) {
         self.device = Some(dev);
+    }
+
+    /// External-mode host delivers the MISO word a transfer shifted in.
+    pub fn rx_push(&mut self, word: u32) {
+        self.rx.push_back(word);
+    }
+
+    /// Is the module enabled (`CR.MEN`)?
+    pub fn enabled(&self) -> bool {
+        self.cr & CR_MEN != 0
+    }
+
+    /// Current frame size in bits (`TCR.FRAMESZ` + 1).
+    pub fn frame_bits(&self) -> u32 {
+        (self.tcr & TCR_FRAMESZ) + 1
     }
 
     fn sr(&self) -> u32 {
@@ -133,6 +154,12 @@ impl LpSpi {
         if self.cr & CR_MEN == 0 {
             return;
         }
+        self.sr_sticky |= SR_WCF | SR_FCF | SR_TCF;
+        if self.external {
+            // The host observes the word through the bus-event trace and
+            // answers with `rx_push`.
+            return;
+        }
         let bits = (self.tcr & TCR_FRAMESZ) + 1;
         let mask = if bits >= 32 {
             u32::MAX
@@ -145,7 +172,6 @@ impl LpSpi {
             None => mosi, // loopback
         };
         self.rx.push_back(miso);
-        self.sr_sticky |= SR_WCF | SR_FCF | SR_TCF;
     }
 
     pub fn irq_pending(&self) -> bool {
@@ -221,6 +247,23 @@ mod tests {
         spi.write(0x60, 15); // 16-bit frames
         spi.write(0x64, 0x1234_ABCD);
         assert_eq!(spi.read(0x74), 0xABCD, "masked to 16 bits");
+    }
+
+    #[test]
+    fn external_mode_defers_the_shift_to_the_host() {
+        let mut spi = LpSpi::new(1);
+        spi.external = true;
+        spi.write(0x10, CR_MEN);
+        spi.write(0x60, 7); // 8-bit frames
+        spi.attach(Box::new(SeqSpiDevice::new([0xDE], 0x00))); // must be idle
+        spi.write(0x64, 0xA5); // TDR
+        assert_ne!(spi.read(0x14) & SR_TCF, 0, "completion status stays local");
+        assert_eq!(spi.read(0x14) & SR_RDF, 0, "no self-satisfied MISO");
+        spi.rx_push(0x5A); // the host answers
+        assert_ne!(spi.read(0x14) & SR_RDF, 0);
+        assert_eq!(spi.read(0x74), 0x5A);
+        assert_eq!(spi.frame_bits(), 8);
+        assert!(spi.enabled());
     }
 
     #[test]

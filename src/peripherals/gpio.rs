@@ -55,13 +55,37 @@ impl Gpio {
         (self.gdir >> pin) & 1 != 0
     }
 
-    /// Host drives an external input level onto `pin`.
+    /// Host drives an external input level onto `pin`. When the pin is an
+    /// input, an edge/level matching its interrupt configuration latches
+    /// `ISR` (RM §12.5.6: ICR1/ICR2 select LOW/HIGH/RISING/FALLING per pin;
+    /// `EDGE_SEL` overrides ICR with any-edge). Level configurations latch
+    /// at injection time only — a held level does not re-assert after W1C.
     pub fn set_input(&mut self, pin: u8, level: bool) {
         let bit = 1u32 << pin;
+        let prev = self.input & bit != 0;
         if level {
             self.input |= bit;
         } else {
             self.input &= !bit;
+        }
+        // Outputs sample DR through PSR — the injected level is inert.
+        if self.gdir & bit != 0 {
+            return;
+        }
+        let latch = if self.edge_sel & bit != 0 {
+            prev != level // EDGE_SEL: any edge
+        } else {
+            // ICR: 2 bits per pin — 00 LOW, 01 HIGH, 10 RISING, 11 FALLING.
+            let icr = if pin < 16 { self.icr1 } else { self.icr2 };
+            match (icr >> ((pin & 15) * 2)) & 0b11 {
+                0b00 => !level,
+                0b01 => level,
+                0b10 => !prev && level,
+                _ => prev && !level,
+            }
+        };
+        if latch {
+            self.isr |= bit;
         }
     }
 
@@ -138,6 +162,52 @@ mod tests {
         g.set_input(1, true); // external high on pin1
         let psr = g.read(0x08);
         assert_eq!(psr & 0x3, 0x3, "output latch + external input both read");
+    }
+
+    #[test]
+    fn input_edges_latch_isr_per_icr() {
+        let mut g = Gpio::new(1);
+        // pin2 RISING (ICR1 cfg 0b10), pin3 FALLING (0b11).
+        g.write(0x0C, (0b10 << 4) | (0b11 << 6));
+        g.set_input(2, true); // rising
+        g.set_input(3, true); // rising — not the configured edge
+        assert_eq!(g.read(0x18), 1 << 2, "only the rising pin latched");
+        g.set_input(3, false); // falling
+        assert_eq!(g.read(0x18), (1 << 2) | (1 << 3));
+        g.write(0x18, 1 << 2); // W1C
+        assert_eq!(g.read(0x18), 1 << 3);
+        g.set_input(2, false); // falling on a rising-configured pin: no latch
+        assert_eq!(g.read(0x18), 1 << 3);
+    }
+
+    #[test]
+    fn input_levels_latch_isr_per_icr() {
+        let mut g = Gpio::new(1);
+        // pin16 HIGH level (ICR2 cfg 0b01); pin17 LOW level (0b00, reset).
+        g.write(0x10, 0b01);
+        g.set_input(16, true);
+        g.set_input(17, false);
+        assert_eq!(g.read(0x18), (1 << 16) | (1 << 17));
+    }
+
+    #[test]
+    fn edge_sel_latches_any_edge() {
+        let mut g = Gpio::new(1);
+        g.write(0x1C, 1 << 5); // EDGE_SEL pin5 (ICR cfg 0b00 would be LOW)
+        g.set_input(5, true);
+        assert_eq!(g.read(0x18), 1 << 5);
+        g.write(0x18, 1 << 5); // W1C
+        g.set_input(5, false);
+        assert_eq!(g.read(0x18), 1 << 5, "both edges latch");
+    }
+
+    #[test]
+    fn outputs_do_not_latch_isr() {
+        let mut g = Gpio::new(1);
+        g.write(0x04, 1 << 4); // pin4 output
+        g.write(0x1C, 1 << 4); // EDGE_SEL — would latch any edge on an input
+        g.set_input(4, true);
+        assert_eq!(g.read(0x18), 0, "injected level is inert on an output");
     }
 
     #[test]

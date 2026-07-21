@@ -73,7 +73,7 @@ impl Clocks {
         let pfd528 = analog.reg(0x100);
         let pfd = |frac: u32| -> u64 {
             let f = u64::from(frac & 0x3F);
-            if f == 0 { 0 } else { PLL_SYS * 18 / f }
+            (PLL_SYS * 18).checked_div(f).unwrap_or(0)
         };
         let pll2_pfd0 = pfd(pfd528);
         let pll2_pfd2 = pfd(pfd528 >> 16);

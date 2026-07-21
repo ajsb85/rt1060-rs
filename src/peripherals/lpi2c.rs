@@ -59,6 +59,12 @@ pub trait I2cDevice {
 
 pub struct LpI2c {
     pub index: u8,
+    /// Host-bridged mode for an embedding wiring engine: `MTDR` commands are
+    /// recorded in the bus-event trace instead of dispatching to the locally
+    /// attached `devices`, and the host answers via [`LpI2c::rx_push`] /
+    /// [`LpI2c::set_nack`]. STOP status (SDF/EPF) stays local — firmware
+    /// polls it.
+    pub external: bool,
     mcr: u32,
     mier: u32,
     mder: u32,
@@ -68,12 +74,15 @@ pub struct LpI2c {
     devices: Vec<Box<dyn I2cDevice + Send>>,
     /// Index into `devices` of the currently addressed target.
     active: Option<usize>,
+    /// External-mode master-busy latch (START..STOP).
+    ext_busy: bool,
 }
 
 impl LpI2c {
     pub fn new(index: u8) -> Self {
         Self {
             index,
+            external: false,
             mcr: 0,
             mier: 0,
             mder: 0,
@@ -81,12 +90,24 @@ impl LpI2c {
             rx: VecDeque::new(),
             devices: Vec::new(),
             active: None,
+            ext_busy: false,
         }
     }
 
     /// Attach a device to this bus (builder-style for tests / board setup).
     pub fn attach(&mut self, dev: Box<dyn I2cDevice + Send>) {
         self.devices.push(dev);
+    }
+
+    /// External-mode host delivers a byte the kernel's device read returned.
+    pub fn rx_push(&mut self, byte: u8) {
+        self.rx.push_back(byte);
+    }
+
+    /// External-mode host reflects an address/data NACK (`MSR.NDF`).
+    pub fn set_nack(&mut self) {
+        self.msr_sticky |= MSR_NDF;
+        self.ext_busy = false;
     }
 
     fn find(&self, addr7: u8) -> Option<usize> {
@@ -101,7 +122,7 @@ impl LpI2c {
         if !self.rx.is_empty() {
             s |= MSR_RDF;
         }
-        if self.active.is_some() {
+        if self.active.is_some() || self.ext_busy {
             s |= MSR_MBF;
         }
         s
@@ -149,10 +170,25 @@ impl LpI2c {
         self.msr_sticky = 0;
         self.rx.clear();
         self.active = None;
+        self.ext_busy = false;
     }
 
     /// Execute one `MTDR` command word.
     fn command(&mut self, cmd: u32, data: u8) {
+        if self.external {
+            // The host observes the command through the bus-event trace and
+            // answers with `rx_push`/`set_nack`; only the locally polled
+            // START/STOP status is kept here.
+            match cmd {
+                CMD_START | CMD_START_NACK => self.ext_busy = true,
+                CMD_STOP => {
+                    self.ext_busy = false;
+                    self.msr_sticky |= MSR_SDF | MSR_EPF;
+                }
+                _ => {}
+            }
+            return;
+        }
         match cmd {
             CMD_START | CMD_START_NACK => {
                 let addr7 = data >> 1;
@@ -311,5 +347,38 @@ mod tests {
         i2c.write(0x18, MSR_NDF); // MIER: NACK interrupt
         i2c.write(0x60, (CMD_START << 8) | (0x42u32 << 1));
         assert!(i2c.irq_pending());
+    }
+
+    #[test]
+    fn external_mode_defers_the_transaction_to_the_host() {
+        let mut i2c = bus_with_sensor();
+        i2c.external = true;
+        // START to the locally attached sensor: not dispatched, not NACKed.
+        i2c.write(0x60, (CMD_START << 8) | (0x1Du32 << 1));
+        assert_eq!(i2c.msr() & MSR_NDF, 0, "host decides the ACK");
+        assert_ne!(i2c.msr() & MSR_MBF, 0, "master busy after START");
+        // RX command: nothing self-satisfies; the host pushes the byte.
+        i2c.write(0x60, CMD_RX << 8);
+        assert_eq!(i2c.msr() & MSR_RDF, 0, "no self-satisfied RX");
+        i2c.rx_push(0x49);
+        assert_ne!(i2c.msr() & MSR_RDF, 0);
+        assert_eq!(i2c.read(0x70) & 0xFF, 0x49);
+        // STOP status stays local — firmware polls SDF/EPF.
+        i2c.write(0x60, CMD_STOP << 8);
+        assert_ne!(i2c.msr() & MSR_SDF, 0);
+        assert_eq!(i2c.msr() & MSR_MBF, 0, "bus idle after STOP");
+    }
+
+    #[test]
+    fn external_mode_host_nack_raises_ndf() {
+        let mut i2c = bus_with_sensor();
+        i2c.external = true;
+        i2c.write(0x18, MSR_NDF); // MIER: NACK interrupt
+        i2c.write(0x60, (CMD_START << 8) | (0x42u32 << 1));
+        assert!(!i2c.irq_pending(), "no local NACK in external mode");
+        i2c.set_nack();
+        assert_ne!(i2c.msr() & MSR_NDF, 0);
+        assert!(i2c.irq_pending());
+        assert_eq!(i2c.msr() & MSR_MBF, 0, "NACK aborts the transaction");
     }
 }

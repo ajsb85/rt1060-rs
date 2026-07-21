@@ -931,7 +931,8 @@ impl CortexM7 {
                     };
                 }
                 (0b1011, 0b1111) => {
-                    self.regs[rd] = if y == 0 { 0 } else { x / y };
+                    // UDIV: divide-by-zero yields 0.
+                    self.regs[rd] = x.checked_div(y).unwrap_or(0);
                 }
                 _ => self.break_cause = Some(BreakCause::Unimplemented(h1 | h2 << 16)),
             }

@@ -59,6 +59,12 @@ impl LpUart {
         self.rx.push_back(byte);
     }
 
+    /// Is the transmitter enabled (`CTRL.TE`)? A `DATA` write transmits only
+    /// when set — the bus-event trace gates on it.
+    pub fn tx_enabled(&self) -> bool {
+        self.ctrl & CTRL_TE != 0
+    }
+
     /// Drain everything transmitted since the last call, as bytes.
     pub fn take_output(&mut self) -> Vec<u8> {
         std::mem::take(&mut self.out)
@@ -117,12 +123,8 @@ impl LpUart {
                 self.stat_sticky &= !(value & STAT_IDLE);
             }
             0x18 => self.ctrl = value,
-            0x1C => {
-                // DATA write: transmit the low byte immediately.
-                if self.ctrl & CTRL_TE != 0 {
-                    self.out.push(value as u8);
-                }
-            }
+            // DATA write: transmit the low byte immediately (when TE).
+            0x1C if self.ctrl & CTRL_TE != 0 => self.out.push(value as u8),
             _ => {}
         }
     }
